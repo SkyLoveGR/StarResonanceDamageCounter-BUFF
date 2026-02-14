@@ -813,11 +813,12 @@
             }
 
             // Buff配置功能
-            function openBuffConfigModal() {
+            async function openBuffConfigModal() {
                 const modal = document.getElementById('buffConfigModal');
                 if (modal) {
                     modal.style.display = 'flex';
-                    loadBuffConfig();
+                    await loadBuffConfigState();
+                    await loadBuffConfig();
                 }
             }
 
@@ -828,10 +829,28 @@
                 }
             }
 
+            async function loadBuffConfigState() {
+                try {
+                    const response = await fetch('/api/buffs/config');
+                    const data = await response.json();
+                    if (data.code === 0 && data.config) {
+                        const showUnmappedCheckbox = document.getElementById('showUnmappedBuffs');
+                        if (showUnmappedCheckbox) {
+                            showUnmappedCheckbox.checked = data.config.showUnmapped ?? false;
+                        }
+                    }
+                } catch (error) {
+                    console.error('Failed to load buff config state:', error);
+                }
+            }
+
             async function loadBuffConfig() {
                 try {
                     const response = await fetch('/api/buffs/all');
-                    const buffs = await response.json();
+                    const data = await response.json();
+                    const allBuffs = data.buffs || [];
+                    const showUnmapped = document.getElementById('showUnmappedBuffs')?.checked ?? false;
+                    const buffs = showUnmapped ? allBuffs : allBuffs.filter((b) => b.mapped);
                     renderBuffConfigList(buffs);
                 } catch (error) {
                     console.error('Failed to load buff config:', error);
@@ -843,6 +862,11 @@
                 if (!listEl) return;
 
                 listEl.innerHTML = '';
+
+                if (buffs.length === 0) {
+                    listEl.innerHTML = '<div class="buff-config-empty">暂无可配置的Buff</div>';
+                    return;
+                }
 
                 buffs.forEach((buff) => {
                     const item = document.createElement('div');
@@ -860,8 +884,11 @@
 
             async function searchBuffs(keyword) {
                 try {
-                    const response = await fetch(`/api/buffs/search?keyword=${encodeURIComponent(keyword)}`);
-                    const buffs = await response.json();
+                    const response = await fetch(`/api/buffs/search?q=${encodeURIComponent(keyword)}`);
+                    const data = await response.json();
+                    const allResults = data.results || [];
+                    const showUnmapped = document.getElementById('showUnmappedBuffs')?.checked ?? false;
+                    const buffs = showUnmapped ? allResults : allResults.filter((b) => b.mapped);
                     renderBuffConfigList(buffs);
                 } catch (error) {
                     console.error('Failed to search buffs:', error);
@@ -881,16 +908,15 @@
             }
 
             async function toggleShowUnmapped(show) {
-                if (show) {
+                try {
+                    await fetch('/api/buffs/config/unmapped', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ show }),
+                    });
                     await loadBuffConfig();
-                } else {
-                    try {
-                        const response = await fetch('/api/buffs/all');
-                        const buffs = await response.json();
-                        renderBuffConfigList(buffs.filter((b) => b.mapped));
-                    } catch (error) {
-                        console.error('Failed to filter buffs:', error);
-                    }
+                } catch (error) {
+                    console.error('Failed to toggle show unmapped:', error);
                 }
             }
 

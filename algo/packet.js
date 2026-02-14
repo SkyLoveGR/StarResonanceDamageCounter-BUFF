@@ -477,31 +477,39 @@ class PacketProcessor {
     }
 
     _processSyncNearDeltaInfo(payloadBuffer) {
-        const syncNearDeltaInfo = pb.SyncNearDeltaInfo.decode(payloadBuffer);
-        // this.logger.debug(JSON.stringify(syncNearDeltaInfo, null, 2));
+        try {
+            const syncNearDeltaInfo = pb.SyncNearDeltaInfo.decode(payloadBuffer);
+            // this.logger.debug(JSON.stringify(syncNearDeltaInfo, null, 2));
 
-        if (!syncNearDeltaInfo.DeltaInfos) return;
-        for (const aoiSyncDelta of syncNearDeltaInfo.DeltaInfos) {
-            this._processAoiSyncDelta(aoiSyncDelta);
+            if (!syncNearDeltaInfo.DeltaInfos) return;
+            for (const aoiSyncDelta of syncNearDeltaInfo.DeltaInfos) {
+                this._processAoiSyncDelta(aoiSyncDelta);
+            }
+        } catch (e) {
+            this.logger.debug(`Failed to decode SyncNearDeltaInfo: ${e.message}`);
         }
     }
 
     _processSyncToMeDeltaInfo(payloadBuffer) {
-        const syncToMeDeltaInfo = pb.SyncToMeDeltaInfo.decode(payloadBuffer);
-        // this.logger.debug(JSON.stringify(syncToMeDeltaInfo, null, 2));
+        try {
+            const syncToMeDeltaInfo = pb.SyncToMeDeltaInfo.decode(payloadBuffer);
+            // this.logger.debug(JSON.stringify(syncToMeDeltaInfo, null, 2));
 
-        const aoiSyncToMeDelta = syncToMeDeltaInfo.DeltaInfo;
+            const aoiSyncToMeDelta = syncToMeDeltaInfo.DeltaInfo;
 
-        const uuid = aoiSyncToMeDelta.Uuid;
-        if (uuid && !currentUserUuid.eq(uuid)) {
-            currentUserUuid = uuid;
-            this.logger.info('Got player UUID! UUID: ' + currentUserUuid + ' UID: ' + currentUserUuid.shiftRight(16));
+            const uuid = aoiSyncToMeDelta.Uuid;
+            if (uuid && !currentUserUuid.eq(uuid)) {
+                currentUserUuid = uuid;
+                this.logger.info('Got player UUID! UUID: ' + currentUserUuid + ' UID: ' + currentUserUuid.shiftRight(16));
+            }
+
+            const aoiSyncDelta = aoiSyncToMeDelta.BaseDelta;
+            if (!aoiSyncDelta) return;
+
+            this._processAoiSyncDelta(aoiSyncDelta);
+        } catch (e) {
+            this.logger.debug(`Failed to decode SyncToMeDeltaInfo: ${e.message}`);
         }
-
-        const aoiSyncDelta = aoiSyncToMeDelta.BaseDelta;
-        if (!aoiSyncDelta) return;
-
-        this._processAoiSyncDelta(aoiSyncDelta);
     }
 
     _processSyncContainerData(payloadBuffer) {

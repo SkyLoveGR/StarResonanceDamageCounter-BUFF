@@ -103,10 +103,10 @@ class BuffMonitor {
     }
 
     loadBuffConfig() {
-        const config = loadJson(BUFF_CONFIG_PATH, { enabledBuffs: [], showUnmapped: true });
+        const config = loadJson(BUFF_CONFIG_PATH, { enabledBuffs: [], showUnmapped: false });
         return {
             enabledBuffs: new Set(config.enabledBuffs || []),
-            showUnmapped: config.showUnmapped !== false,
+            showUnmapped: config.showUnmapped === true,
         };
     }
 
@@ -135,9 +135,6 @@ class BuffMonitor {
     selectAllBuffs(enabled) {
         if (enabled) {
             for (const [id, name] of Object.entries(this.buffMap)) {
-                this.buffConfig.enabledBuffs.add(id);
-            }
-            for (const [id, info] of Object.entries(this.buffSeen)) {
                 this.buffConfig.enabledBuffs.add(id);
             }
         } else {

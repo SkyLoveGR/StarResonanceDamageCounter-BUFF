@@ -1301,8 +1301,17 @@ async function main() {
     }
 
     // 显示可用设备
+    let recommendedDevice = null;
+    if (cap && findDefaultNetworkDevice) {
+        recommendedDevice = await findDefaultNetworkDevice(devices);
+    }
     for (let i = 0; i < devices.length; i++) {
-        print(String(i).padStart(2, ' ') + '.' + (devices[i].description || devices[i].name));
+        const isRecommended = recommendedDevice === i;
+        const marker = isRecommended ? ' \x1b[32m(推荐)\x1b[0m' : '';
+        print(String(i).padStart(2, ' ') + '.' + (devices[i].description || devices[i].name) + marker);
+    }
+    if (recommendedDevice !== null) {
+        print('\x1b[36m提示: 推荐选择标记为"(推荐)"的网卡，通常是你当前使用的网络连接\x1b[0m');
     }
 
     if (num === 'auto' && cap && findDefaultNetworkDevice) {
