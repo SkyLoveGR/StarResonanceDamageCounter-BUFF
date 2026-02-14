@@ -1,0 +1,1105 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Buff监控</title>
+        <script src="socket.io.min.js"></script>
+        <link rel="stylesheet" type="text/css" href="css/style.css" />
+    </head>
+
+    <body>
+        <h1 id="appTitle"><span>✨ Buff监控</span></h1>
+        <div style="margin: 20px 0"></div>
+        <button class="main-button" onclick="toggleDarkMode()">🌙 夜间模式</button>
+        <button class="main-button" onclick="clearUserCache()">🗑️ 清空缓存</button>
+        <button class="main-button" onclick="toggleBuffFloat()">📺 显示/隐藏浮窗</button>
+
+        <!-- 服务器状态提示 -->
+        <div id="serverStatus" class="server-status">
+            <span id="serverStatusText">连接中...</span>
+        </div>
+
+        <!-- 网页主体Buff监控卡片 -->
+        <div class="card" id="buffCard">
+            <h3 style="margin-top: 0; display: flex; align-items: center; gap: 8px">
+                <span>✨ Buff监控</span>
+                <span id="buffSummary" class="buff-summary"></span>
+                <button id="buffConfigBtn" class="buff-config-btn" title="Buff配置">⚙️</button>
+                <button id="buffMapBtn" class="buff-config-btn" title="映射管理">📝</button>
+            </h3>
+            <div class="buff-filter-bar">
+                <input
+                    type="text"
+                    id="buffEntityFilter"
+                    placeholder="输入角色ID或名字筛选..."
+                    class="buff-entity-input"
+                    oninput="filterBuffByEntity(this.value)"
+                />
+                <div class="buff-entity-multiselect">
+                    <div class="buff-multiselect-header" onclick="toggleMultiSelectDropdown()">
+                        <span id="buffMultiselectText">全部角色</span>
+                        <span class="buff-multiselect-arrow">▼</span>
+                    </div>
+                    <div id="buffMultiselectDropdown" class="buff-multiselect-dropdown" style="display: none">
+                        <label class="buff-multiselect-option">
+                            <input type="checkbox" value="" checked onchange="updateMultiSelectAll(this.checked)" />
+                            <span>全部角色</span>
+                        </label>
+                        <div id="buffMultiselectOptions"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="buffList" class="buff-list">
+                <div class="buff-empty">暂无可监控的Buff</div>
+            </div>
+        </div>
+
+        <!-- Buff监控浮窗 -->
+        <div id="buffFloatWindow" class="buff-float-window" style="display: none">
+            <div class="buff-float-header" id="buffFloatHeader">
+                <span>✨ Buff监控</span>
+                <span id="buffFloatSummary" class="buff-summary"></span>
+                <div class="buff-float-actions">
+                    <button class="buff-float-btn" onclick="openBuffConfigModal()" title="Buff配置">⚙️</button>
+                    <button class="buff-float-btn" onclick="openBuffMapModal()" title="映射管理">📝</button>
+                    <button class="buff-float-btn" onclick="toggleBuffFloatMinimize()" title="最小化">➖</button>
+                </div>
+            </div>
+            <div id="buffFloatContent" class="buff-float-content">
+                <div class="buff-filter-bar">
+                    <input
+                        type="text"
+                        id="buffFloatEntityFilter"
+                        placeholder="输入角色ID或名字筛选..."
+                        class="buff-entity-input"
+                        oninput="filterBuffByEntity(this.value)"
+                    />
+                    <div class="buff-entity-multiselect">
+                        <div class="buff-multiselect-header" onclick="toggleFloatMultiSelectDropdown()">
+                            <span id="buffFloatMultiselectText">全部角色</span>
+                            <span class="buff-multiselect-arrow">▼</span>
+                        </div>
+                        <div id="buffFloatMultiselectDropdown" class="buff-multiselect-dropdown" style="display: none">
+                            <label class="buff-multiselect-option">
+                                <input type="checkbox" value="" checked onchange="updateFloatMultiSelectAll(this.checked)" />
+                                <span>全部角色</span>
+                            </label>
+                            <div id="buffFloatMultiselectOptions"></div>
+                        </div>
+                    </div>
+                </div>
+                <div id="buffFloatList" class="buff-list">
+                    <div class="buff-empty">暂无可监控的Buff</div>
+                </div>
+            </div>
+            <div class="buff-float-resize-handle" onmousedown="startResize(event)"></div>
+        </div>
+
+        <!-- Buff配置面板 -->
+        <div id="buffConfigModal" class="modal" style="display: none">
+            <div class="modal-content buff-config-modal">
+                <div class="modal-header">
+                    <h3>⚙️ Buff配置</h3>
+                    <button class="close-btn" onclick="closeBuffConfigModal()">&times;</button>
+                </div>
+                <div class="buff-config-body">
+                    <div class="buff-config-search">
+                        <input type="text" id="buffSearchInput" placeholder="搜索Buff (ID或名称)..." oninput="searchBuffs(this.value)" />
+                    </div>
+                    <div class="buff-config-options">
+                        <label class="buff-config-option">
+                            <input type="checkbox" id="showUnmappedBuffs" onchange="toggleShowUnmapped(this.checked)" />
+                            <span>显示未映射的Buff</span>
+                        </label>
+                        <div class="buff-config-buttons">
+                            <button class="buff-config-btn-small" onclick="selectAllBuffs(true)">全选</button>
+                            <button class="buff-config-btn-small" onclick="selectAllBuffs(false)">全不选</button>
+                        </div>
+                        <div class="buff-config-hint">勾选下方Buff以启用监控，未勾选的Buff将不会显示</div>
+                    </div>
+                    <div id="buffConfigList" class="buff-config-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Buff映射管理面板 -->
+        <div id="buffMapModal" class="modal" style="display: none">
+            <div class="modal-content buff-map-modal">
+                <div class="modal-header">
+                    <h3>📝 Buff映射管理</h3>
+                    <button class="close-btn" onclick="closeBuffMapModal()">&times;</button>
+                </div>
+                <div class="buff-map-body">
+                    <div class="buff-map-toolbar">
+                        <input
+                            type="text"
+                            id="buffMapSearchInput"
+                            placeholder="搜索映射 (ID或名称)..."
+                            oninput="searchBuffMap(this.value)"
+                            class="buff-map-search"
+                        />
+                        <button class="buff-map-add-btn" onclick="openAddBuffMapModal()">➕ 新增映射</button>
+                    </div>
+                    <div id="buffMapList" class="buff-map-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 新增/编辑映射弹窗 -->
+        <div id="buffMapEditModal" class="modal" style="display: none">
+            <div class="modal-content buff-map-edit-modal">
+                <div class="modal-header">
+                    <h3 id="buffMapEditTitle">新增映射</h3>
+                    <button class="close-btn" onclick="closeBuffMapEditModal()">&times;</button>
+                </div>
+                <div class="buff-map-edit-body">
+                    <div class="buff-map-edit-row">
+                        <label>Buff ID:</label>
+                        <input type="text" id="buffMapEditId" placeholder="输入Buff ID" />
+                    </div>
+                    <div class="buff-map-edit-row">
+                        <label>名称:</label>
+                        <input type="text" id="buffMapEditName" placeholder="输入Buff名称" />
+                    </div>
+                    <div class="buff-map-edit-actions">
+                        <button class="buff-map-save-btn" onclick="saveBuffMap()">保存</button>
+                        <button class="buff-map-cancel-btn" onclick="closeBuffMapEditModal()">取消</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer style="margin-top: 40px; font-size: 14px; color: #888">
+            <span id="appVersion"></span>
+            <span> | © 2025 Made with ❤️ by </span>
+            <a href="https://github.com/dmlgzs/" target="_blank">Dimole</a>
+        </footer>
+
+        <script>
+            const CURRENT_VERSION = '3.3.6';
+
+            // WebSocket连接相关变量
+            let socket = null;
+            let isWebSocketConnected = false;
+            let lastWebSocketMessage = Date.now();
+            let webSocketReconnectAttempts = 0;
+            let fallbackToAPI = false;
+            let apiInterval = null;
+
+            // 服务器状态提示相关变量
+            let serverStatusTimeout = null;
+
+            // Buff监控相关变量
+            let lastBuffSignature = '';
+            let currentBuffEntityFilter = '';
+            let selectedEntityUids = new Set();
+            let allEntitiesSelected = true;
+            let entityInfoMap = {};
+            let userHasSelectedEntities = false; // 用户是否手动选择过角色
+
+            // 浮窗相关变量
+            let isDragging = false;
+            let dragOffsetX = 0;
+            let dragOffsetY = 0;
+            let isFloatMinimized = false;
+            let isResizing = false;
+            let resizeStartX = 0;
+            let resizeStartY = 0;
+            let resizeStartWidth = 0;
+            let resizeStartHeight = 0;
+
+            // 夜间模式
+            function initTheme() {
+                const savedTheme = localStorage.getItem('theme');
+                if (savedTheme === 'dark') {
+                    document.body.classList.add('dark-mode');
+                }
+            }
+
+            function toggleDarkMode() {
+                document.body.classList.toggle('dark-mode');
+                const isDark = document.body.classList.contains('dark-mode');
+                localStorage.setItem('theme', isDark ? 'dark' : 'light');
+            }
+
+            // 清空用户缓存
+            async function clearUserCache() {
+                if (!confirm('确定要清空所有角色缓存吗？清空后需要重新进入游戏才能获取角色信息。')) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/api/cache/clear', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                    });
+                    const data = await response.json();
+                    if (data.code === 0) {
+                        entityInfoMap = {};
+                        selectedEntityUids.clear();
+                        const optionsContainer = document.getElementById('buffMultiselectOptions');
+                        if (optionsContainer) {
+                            optionsContainer.innerHTML = '';
+                        }
+                        updateMultiSelectText();
+                        showServerStatus('缓存已清空，请重新进入游戏获取角色信息', 'success');
+                    } else {
+                        alert(data.msg || '清空缓存失败');
+                    }
+                } catch (error) {
+                    console.error('Failed to clear cache:', error);
+                    alert('清空缓存失败');
+                }
+            }
+
+            // 浮窗功能
+            function initFloatWindow() {
+                const floatWindow = document.getElementById('buffFloatWindow');
+                const header = document.getElementById('buffFloatHeader');
+
+                // 从localStorage恢复位置和大小
+                const savedLeft = localStorage.getItem('buffFloatLeft');
+                const savedTop = localStorage.getItem('buffFloatTop');
+                const savedWidth = localStorage.getItem('buffFloatWidth');
+                const savedHeight = localStorage.getItem('buffFloatHeight');
+                const savedMinimized = localStorage.getItem('buffFloatMinimized');
+                const savedVisible = localStorage.getItem('buffFloatVisible');
+
+                if (savedLeft && savedTop) {
+                    floatWindow.style.left = savedLeft;
+                    floatWindow.style.top = savedTop;
+                    floatWindow.style.right = 'auto';
+                }
+
+                if (savedWidth) {
+                    floatWindow.style.width = savedWidth;
+                }
+                if (savedHeight) {
+                    floatWindow.style.height = savedHeight;
+                }
+
+                if (savedMinimized === 'true') {
+                    isFloatMinimized = true;
+                    document.getElementById('buffFloatContent').style.display = 'none';
+                }
+
+                if (savedVisible === 'false') {
+                    floatWindow.style.display = 'none';
+                }
+
+                // 拖动功能
+                header.addEventListener('mousedown', startDrag);
+                document.addEventListener('mousemove', drag);
+                document.addEventListener('mouseup', stopDrag);
+
+                // 触摸支持
+                header.addEventListener('touchstart', startDragTouch);
+                document.addEventListener('touchmove', dragTouch);
+                document.addEventListener('touchend', stopDrag);
+
+                // 大小调整功能
+                document.addEventListener('mousemove', resize);
+                document.addEventListener('mouseup', stopResize);
+            }
+
+            function startDrag(e) {
+                if (e.target.tagName === 'BUTTON') return;
+                isDragging = true;
+                const floatWindow = document.getElementById('buffFloatWindow');
+                const rect = floatWindow.getBoundingClientRect();
+                dragOffsetX = e.clientX - rect.left;
+                dragOffsetY = e.clientY - rect.top;
+                floatWindow.style.right = 'auto';
+            }
+
+            function startDragTouch(e) {
+                if (e.target.tagName === 'BUTTON') return;
+                isDragging = true;
+                const floatWindow = document.getElementById('buffFloatWindow');
+                const rect = floatWindow.getBoundingClientRect();
+                dragOffsetX = e.touches[0].clientX - rect.left;
+                dragOffsetY = e.touches[0].clientY - rect.top;
+                floatWindow.style.right = 'auto';
+            }
+
+            function drag(e) {
+                if (!isDragging) return;
+                const floatWindow = document.getElementById('buffFloatWindow');
+                let newLeft = e.clientX - dragOffsetX;
+                let newTop = e.clientY - dragOffsetY;
+
+                // 边界检查
+                newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - floatWindow.offsetWidth));
+                newTop = Math.max(0, Math.min(newTop, window.innerHeight - floatWindow.offsetHeight));
+
+                floatWindow.style.left = newLeft + 'px';
+                floatWindow.style.top = newTop + 'px';
+            }
+
+            function dragTouch(e) {
+                if (!isDragging) return;
+                e.preventDefault();
+                const floatWindow = document.getElementById('buffFloatWindow');
+                let newLeft = e.touches[0].clientX - dragOffsetX;
+                let newTop = e.touches[0].clientY - dragOffsetY;
+
+                newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - floatWindow.offsetWidth));
+                newTop = Math.max(0, Math.min(newTop, window.innerHeight - floatWindow.offsetHeight));
+
+                floatWindow.style.left = newLeft + 'px';
+                floatWindow.style.top = newTop + 'px';
+            }
+
+            function stopDrag() {
+                if (isDragging) {
+                    isDragging = false;
+                    const floatWindow = document.getElementById('buffFloatWindow');
+                    localStorage.setItem('buffFloatLeft', floatWindow.style.left);
+                    localStorage.setItem('buffFloatTop', floatWindow.style.top);
+                }
+            }
+
+            // 大小调整功能
+            function startResize(e) {
+                isResizing = true;
+                const floatWindow = document.getElementById('buffFloatWindow');
+                resizeStartX = e.clientX;
+                resizeStartY = e.clientY;
+                resizeStartWidth = floatWindow.offsetWidth;
+                resizeStartHeight = floatWindow.offsetHeight;
+                e.preventDefault();
+            }
+
+            function resize(e) {
+                if (!isResizing) return;
+                const floatWindow = document.getElementById('buffFloatWindow');
+                const deltaX = e.clientX - resizeStartX;
+                const deltaY = e.clientY - resizeStartY;
+
+                const newWidth = Math.max(200, resizeStartWidth + deltaX);
+                const newHeight = Math.max(150, resizeStartHeight + deltaY);
+
+                floatWindow.style.width = newWidth + 'px';
+                floatWindow.style.height = newHeight + 'px';
+            }
+
+            function stopResize() {
+                if (isResizing) {
+                    isResizing = false;
+                    const floatWindow = document.getElementById('buffFloatWindow');
+                    localStorage.setItem('buffFloatWidth', floatWindow.style.width);
+                    localStorage.setItem('buffFloatHeight', floatWindow.style.height);
+                }
+            }
+
+            function toggleBuffFloat() {
+                const floatWindow = document.getElementById('buffFloatWindow');
+                if (floatWindow.style.display === 'none') {
+                    floatWindow.style.display = 'block';
+                    localStorage.setItem('buffFloatVisible', 'true');
+                } else {
+                    floatWindow.style.display = 'none';
+                    localStorage.setItem('buffFloatVisible', 'false');
+                }
+            }
+
+            function toggleBuffFloatMinimize() {
+                const content = document.getElementById('buffFloatContent');
+                isFloatMinimized = !isFloatMinimized;
+                content.style.display = isFloatMinimized ? 'none' : 'block';
+                localStorage.setItem('buffFloatMinimized', isFloatMinimized);
+            }
+
+            // 服务器状态
+            function showServerStatus(message, type = 'info') {
+                const statusEl = document.getElementById('serverStatus');
+                const textEl = document.getElementById('serverStatusText');
+                if (!statusEl || !textEl) return;
+
+                textEl.textContent = message;
+                statusEl.className = 'server-status';
+                if (type === 'error') statusEl.classList.add('error');
+                else if (type === 'success') statusEl.classList.add('success');
+
+                statusEl.style.display = 'block';
+
+                if (serverStatusTimeout) clearTimeout(serverStatusTimeout);
+                serverStatusTimeout = setTimeout(() => {
+                    statusEl.style.display = 'none';
+                }, 3000);
+            }
+
+            // WebSocket连接
+            function connectWebSocket() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}`;
+
+                try {
+                    socket = io(wsUrl, {
+                        transports: ['websocket'],
+                        reconnection: true,
+                        reconnectionAttempts: 10,
+                        reconnectionDelay: 1000,
+                    });
+
+                    socket.on('connect', () => {
+                        isWebSocketConnected = true;
+                        webSocketReconnectAttempts = 0;
+                        showServerStatus('已连接', 'success');
+                    });
+
+                    socket.on('disconnect', () => {
+                        isWebSocketConnected = false;
+                        showServerStatus('连接断开，正在重连...', 'error');
+                    });
+
+                    socket.on('connect_error', () => {
+                        webSocketReconnectAttempts++;
+                        if (webSocketReconnectAttempts > 5) {
+                            showServerStatus('WebSocket连接失败，切换到API模式', 'error');
+                            fallbackToAPI = true;
+                            startApiFallback();
+                        }
+                    });
+
+                    socket.on('data', (data) => {
+                        lastWebSocketMessage = Date.now();
+                        processDataUpdate(data);
+                    });
+                } catch (error) {
+                    console.error('WebSocket connection error:', error);
+                    fallbackToAPI = true;
+                    startApiFallback();
+                }
+            }
+
+            function startApiFallback() {
+                if (apiInterval) clearInterval(apiInterval);
+                apiInterval = setInterval(fetchDataFromAPI, 500);
+            }
+
+            async function fetchDataFromAPI() {
+                try {
+                    const response = await fetch('/api/buffs');
+                    const data = await response.json();
+                    processDataUpdate(data);
+                } catch (error) {
+                    console.error('API fetch error:', error);
+                }
+            }
+
+            function processDataUpdate(data) {
+                if (data.buff) {
+                    const signature = JSON.stringify(data.buff);
+                    if (signature !== lastBuffSignature) {
+                        lastBuffSignature = signature;
+                        updateBuffList(data.buff, data.entityUids || []);
+                    }
+                }
+            }
+
+            // Buff监控功能
+            function filterBuffByEntity(value) {
+                currentBuffEntityFilter = value.trim();
+            }
+
+            function toggleMultiSelectDropdown() {
+                const dropdown = document.getElementById('buffMultiselectDropdown');
+                if (dropdown) {
+                    const isOpen = dropdown.style.display === 'block';
+                    // 关闭所有下拉框
+                    closeAllDropdowns();
+                    // 如果之前是关闭的，则打开
+                    if (!isOpen) {
+                        dropdown.style.display = 'block';
+                    }
+                }
+            }
+
+            function toggleFloatMultiSelectDropdown() {
+                const dropdown = document.getElementById('buffFloatMultiselectDropdown');
+                if (dropdown) {
+                    const isOpen = dropdown.style.display === 'block';
+                    closeAllDropdowns();
+                    if (!isOpen) {
+                        dropdown.style.display = 'block';
+                    }
+                }
+            }
+
+            function closeAllDropdowns() {
+                const mainDropdown = document.getElementById('buffMultiselectDropdown');
+                const floatDropdown = document.getElementById('buffFloatMultiselectDropdown');
+                if (mainDropdown) mainDropdown.style.display = 'none';
+                if (floatDropdown) floatDropdown.style.display = 'none';
+            }
+
+            // 点击外部关闭下拉框
+            document.addEventListener('click', function (e) {
+                const mainMultiselect = document.querySelector('.card .buff-entity-multiselect');
+                const floatMultiselect = document.querySelector('.buff-float-content .buff-entity-multiselect');
+
+                if (mainMultiselect && !mainMultiselect.contains(e.target)) {
+                    const dropdown = document.getElementById('buffMultiselectDropdown');
+                    if (dropdown) dropdown.style.display = 'none';
+                }
+                if (floatMultiselect && !floatMultiselect.contains(e.target)) {
+                    const dropdown = document.getElementById('buffFloatMultiselectDropdown');
+                    if (dropdown) dropdown.style.display = 'none';
+                }
+            });
+
+            function updateMultiSelectAll(checked) {
+                allEntitiesSelected = checked;
+                selectedEntityUids.clear();
+                if (checked) {
+                    Object.keys(entityInfoMap).forEach((uidStr) => selectedEntityUids.add(parseInt(uidStr)));
+                }
+                userHasSelectedEntities = !checked; // 如果选中全部角色，重置为false；否则标记为用户手动选择
+                updateMultiSelectText();
+                // 更新网页主体的选项
+                const options = document.querySelectorAll('#buffMultiselectOptions input[type="checkbox"]');
+                options.forEach((cb) => (cb.checked = checked));
+                // 更新浮窗的选项
+                const floatOptions = document.querySelectorAll('#buffFloatMultiselectOptions input[type="checkbox"]');
+                floatOptions.forEach((cb) => (cb.checked = checked));
+            }
+
+            function toggleEntitySelection(uid, checked) {
+                const numUid = parseInt(uid);
+                if (checked) {
+                    selectedEntityUids.add(numUid);
+                } else {
+                    selectedEntityUids.delete(numUid);
+                }
+                userHasSelectedEntities = true; // 标记用户已手动选择
+                updateMultiSelectText();
+                // 同步更新两个地方的checkbox状态
+                const mainCb = document.querySelector(`#buffMultiselectOptions input[value="${uid}"]`);
+                if (mainCb) mainCb.checked = checked;
+                const floatCb = document.querySelector(`#buffFloatMultiselectOptions input[value="${uid}"]`);
+                if (floatCb) floatCb.checked = checked;
+            }
+
+            function updateMultiSelectText() {
+                const textEl = document.getElementById('buffMultiselectText');
+                const floatTextEl = document.getElementById('buffFloatMultiselectText');
+
+                let text = '未选择角色';
+                if (selectedEntityUids.size === 0) {
+                    text = '未选择角色';
+                } else if (selectedEntityUids.size === Object.keys(entityInfoMap).length) {
+                    text = '全部角色';
+                } else {
+                    text = `已选 ${selectedEntityUids.size} 个角色`;
+                }
+
+                if (textEl) textEl.textContent = text;
+                if (floatTextEl) floatTextEl.textContent = text;
+            }
+
+            function updateFloatMultiSelectAll(checked) {
+                updateMultiSelectAll(checked);
+            }
+
+            function updateBuffList(buffData, entityUids = []) {
+                // 更新网页主体
+                renderBuffListToContainer('buffList', 'buffSummary', 'buffMultiselectOptions', buffData, entityUids);
+                // 更新浮窗
+                renderBuffListToContainer('buffFloatList', 'buffFloatSummary', 'buffFloatMultiselectOptions', buffData, entityUids);
+            }
+
+            function renderBuffListToContainer(listId, summaryId, optionsId, buffData, entityUids = []) {
+                const buffList = document.getElementById(listId);
+                const buffSummary = document.getElementById(summaryId);
+                if (!buffList || !buffSummary) return;
+
+                entityUids.forEach((entity) => {
+                    if (typeof entity === 'object') {
+                        const uidStr = String(entity.uid);
+                        if (!entityInfoMap[uidStr]) {
+                            entityInfoMap[uidStr] = entity.name;
+                        }
+                    } else {
+                        const uidStr = String(entity);
+                        if (!entityInfoMap[uidStr]) {
+                            entityInfoMap[uidStr] = `角色${entity}`;
+                        }
+                    }
+                });
+
+                Object.keys(buffData).forEach((uidStr) => {
+                    if (!entityInfoMap[uidStr]) {
+                        entityInfoMap[uidStr] = `角色${uidStr}`;
+                    }
+                });
+
+                // 默认选中所有角色（仅首次加载时）
+                if (selectedEntityUids.size === 0 && entityUids.length > 0 && !userHasSelectedEntities) {
+                    entityUids.forEach((entity) => {
+                        const uid = typeof entity === 'object' ? entity.uid : entity;
+                        selectedEntityUids.add(parseInt(uid));
+                    });
+                }
+
+                let totalBuffCount = 0;
+                for (const entityUid in buffData) {
+                    totalBuffCount += Object.keys(buffData[entityUid]).length;
+                }
+                buffSummary.textContent = `(${totalBuffCount}个)`;
+
+                const optionsContainer = document.getElementById(optionsId);
+                if (optionsContainer) {
+                    const existingUids = new Set();
+                    optionsContainer.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+                        existingUids.add(String(cb.value));
+                    });
+
+                    entityUids.forEach((entity) => {
+                        const uid = typeof entity === 'object' ? entity.uid : entity;
+                        const numUid = parseInt(uid);
+                        const uidStr = String(uid);
+                        if (!existingUids.has(uidStr)) {
+                            const name = typeof entity === 'object' ? entity.name : `角色${entity}`;
+                            const label = document.createElement('label');
+                            label.className = 'buff-multiselect-option';
+                            label.innerHTML = `
+                                <input type="checkbox" value="${uid}" ${selectedEntityUids.has(numUid) ? 'checked' : ''} onchange="toggleEntitySelection(${uid}, this.checked)">
+                                <span>${name} (${uid})</span>
+                            `;
+                            optionsContainer.appendChild(label);
+                        }
+                    });
+                    updateMultiSelectText();
+                }
+
+                buffList.innerHTML = '';
+
+                if (totalBuffCount === 0) {
+                    const emptyDiv = document.createElement('div');
+                    emptyDiv.className = 'buff-empty';
+                    emptyDiv.textContent = '暂无可监控的Buff';
+                    buffList.appendChild(emptyDiv);
+                    return;
+                }
+
+                const sortedEntityUids = Object.keys(buffData).sort((a, b) => parseInt(a) - parseInt(b));
+
+                for (const entityUidStr of sortedEntityUids) {
+                    const entityUid = parseInt(entityUidStr);
+
+                    if (currentBuffEntityFilter) {
+                        const entityName = entityInfoMap[entityUidStr] || '';
+                        if (!entityUidStr.includes(currentBuffEntityFilter) && !entityName.includes(currentBuffEntityFilter)) {
+                            continue;
+                        }
+                    }
+
+                    // 如果用户手动选择过角色，只显示选中的角色
+                    if (userHasSelectedEntities && selectedEntityUids.size > 0 && !selectedEntityUids.has(entityUid)) {
+                        continue;
+                    }
+
+                    const entityBuffs = buffData[entityUidStr];
+                    const entityBuffCount = Object.keys(entityBuffs).length;
+
+                    if (entityBuffCount === 0) continue;
+
+                    const entityName = entityInfoMap[entityUidStr] || `角色${entityUid}`;
+
+                    // 浮窗使用不同的布局结构
+                    if (listId === 'buffFloatList') {
+                        // 创建角色列容器
+                        const entityColumn = document.createElement('div');
+                        entityColumn.className = 'buff-float-column';
+
+                        // 角色名标题（竖向显示）
+                        const entityHeader = document.createElement('div');
+                        entityHeader.className = 'buff-entity-header';
+                        entityHeader.innerHTML = `<span class="buff-entity-title">${entityName}</span>`;
+                        entityColumn.appendChild(entityHeader);
+
+                        // buff列表容器
+                        const entityBuffContainer = document.createElement('div');
+                        entityBuffContainer.className = 'buff-entity-container';
+
+                        const sortedBuffs = Object.entries(entityBuffs).sort((a, b) => {
+                            const remainingA = parseFloat(a[1].remainingSec || 0);
+                            const remainingB = parseFloat(b[1].remainingSec || 0);
+                            return remainingA - remainingB;
+                        });
+
+                        sortedBuffs.forEach(([buffId, buffInfo]) => {
+                            const buffItem = document.createElement('div');
+                            buffItem.className = 'buff-item';
+
+                            const progress = parseFloat(buffInfo.progress || 0) * 100;
+                            const remainingSec = parseFloat(buffInfo.remainingSec || 0);
+
+                            let intensityClass = '';
+                            if (progress > 70) intensityClass = 'buff-high';
+                            else if (progress > 30) intensityClass = 'buff-medium';
+                            else intensityClass = 'buff-low';
+
+                            buffItem.innerHTML = `
+                                <div class="buff-header">
+                                    <span class="buff-name">${buffInfo.name}</span>
+                                    <span class="buff-info">
+                                        <span class="buff-time">${remainingSec.toFixed(1)}s</span>
+                                    </span>
+                                </div>
+                                <div class="buff-progress-container">
+                                    <div class="buff-progress-bar ${intensityClass}" style="width: ${progress.toFixed(1)}%"></div>
+                                </div>
+                            `;
+
+                            entityBuffContainer.appendChild(buffItem);
+                        });
+
+                        entityColumn.appendChild(entityBuffContainer);
+                        buffList.appendChild(entityColumn);
+                    } else {
+                        // 网页主体使用原有布局
+                        const entityHeader = document.createElement('div');
+                        entityHeader.className = 'buff-entity-header';
+                        entityHeader.innerHTML = `<span class="buff-entity-title">${entityName} (${entityUid})</span><span class="buff-entity-count">(${entityBuffCount}个buff)</span>`;
+                        buffList.appendChild(entityHeader);
+
+                        const entityBuffContainer = document.createElement('div');
+                        entityBuffContainer.className = 'buff-entity-container';
+
+                        const sortedBuffs = Object.entries(entityBuffs).sort((a, b) => {
+                            const remainingA = parseFloat(a[1].remainingSec || 0);
+                            const remainingB = parseFloat(b[1].remainingSec || 0);
+                            return remainingA - remainingB;
+                        });
+
+                        sortedBuffs.forEach(([buffId, buffInfo]) => {
+                            const buffItem = document.createElement('div');
+                            buffItem.className = 'buff-item';
+
+                            const progress = parseFloat(buffInfo.progress || 0) * 100;
+                            const remainingSec = parseFloat(buffInfo.remainingSec || 0);
+                            const totalDurationSec = parseFloat(buffInfo.totalDurationSec || 0);
+
+                            let intensityClass = '';
+                            if (progress > 70) intensityClass = 'buff-high';
+                            else if (progress > 30) intensityClass = 'buff-medium';
+                            else intensityClass = 'buff-low';
+
+                            buffItem.innerHTML = `
+                                <div class="buff-header">
+                                    <span class="buff-name">${buffInfo.name}</span>
+                                    <span class="buff-info">
+                                        <span class="buff-stack">${buffInfo.stack}层</span>
+                                        <span class="buff-time">${remainingSec.toFixed(1)}s</span>
+                                    </span>
+                                </div>
+                                <div class="buff-progress-container">
+                                    <div class="buff-progress-bar ${intensityClass}" style="width: ${progress.toFixed(1)}%"></div>
+                                </div>
+                                <div class="buff-footer">
+                                    <span class="buff-duration">总时长: ${totalDurationSec.toFixed(1)}s</span>
+                                    <span class="buff-id">ID: ${buffId}</span>
+                                </div>
+                            `;
+
+                            entityBuffContainer.appendChild(buffItem);
+                        });
+
+                        buffList.appendChild(entityBuffContainer);
+                    }
+                }
+            }
+
+            // Buff配置功能
+            function openBuffConfigModal() {
+                const modal = document.getElementById('buffConfigModal');
+                if (modal) {
+                    modal.style.display = 'flex';
+                    loadBuffConfig();
+                }
+            }
+
+            function closeBuffConfigModal() {
+                const modal = document.getElementById('buffConfigModal');
+                if (modal) {
+                    modal.style.display = 'none';
+                }
+            }
+
+            async function loadBuffConfig() {
+                try {
+                    const response = await fetch('/api/buffs/all');
+                    const buffs = await response.json();
+                    renderBuffConfigList(buffs);
+                } catch (error) {
+                    console.error('Failed to load buff config:', error);
+                }
+            }
+
+            function renderBuffConfigList(buffs) {
+                const listEl = document.getElementById('buffConfigList');
+                if (!listEl) return;
+
+                listEl.innerHTML = '';
+
+                buffs.forEach((buff) => {
+                    const item = document.createElement('div');
+                    item.className = 'buff-config-item';
+                    item.innerHTML = `
+                        <label class="buff-config-item-label">
+                            <input type="checkbox" ${buff.enabled ? 'checked' : ''} onchange="toggleBuffEnabled('${buff.id}', this.checked)">
+                            <span class="buff-config-item-name">${buff.name}</span>
+                        </label>
+                        <span class="buff-config-id">${buff.id}</span>
+                    `;
+                    listEl.appendChild(item);
+                });
+            }
+
+            async function searchBuffs(keyword) {
+                try {
+                    const response = await fetch(`/api/buffs/search?keyword=${encodeURIComponent(keyword)}`);
+                    const buffs = await response.json();
+                    renderBuffConfigList(buffs);
+                } catch (error) {
+                    console.error('Failed to search buffs:', error);
+                }
+            }
+
+            async function toggleBuffEnabled(buffId, enabled) {
+                try {
+                    await fetch('/api/buffs/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ buffId, enabled }),
+                    });
+                } catch (error) {
+                    console.error('Failed to toggle buff:', error);
+                }
+            }
+
+            async function toggleShowUnmapped(show) {
+                if (show) {
+                    await loadBuffConfig();
+                } else {
+                    try {
+                        const response = await fetch('/api/buffs/all');
+                        const buffs = await response.json();
+                        renderBuffConfigList(buffs.filter((b) => b.mapped));
+                    } catch (error) {
+                        console.error('Failed to filter buffs:', error);
+                    }
+                }
+            }
+
+            async function selectAllBuffs(enabled) {
+                try {
+                    await fetch('/api/buffs/config/selectall', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enabled }),
+                    });
+                    await loadBuffConfig();
+                } catch (error) {
+                    console.error('Failed to select all buffs:', error);
+                }
+            }
+
+            // Buff映射管理功能
+            let currentBuffMap = {};
+            let editingBuffMapId = null;
+
+            async function openBuffMapModal() {
+                const modal = document.getElementById('buffMapModal');
+                if (modal) {
+                    modal.style.display = 'flex';
+                    await loadBuffMap();
+                }
+            }
+
+            function closeBuffMapModal() {
+                const modal = document.getElementById('buffMapModal');
+                if (modal) {
+                    modal.style.display = 'none';
+                }
+            }
+
+            async function loadBuffMap() {
+                try {
+                    const response = await fetch('/api/buffs/map');
+                    const data = await response.json();
+                    if (data.code === 0) {
+                        currentBuffMap = data.map;
+                        renderBuffMapList(data.map);
+                    }
+                } catch (error) {
+                    console.error('Failed to load buff map:', error);
+                }
+            }
+
+            function renderBuffMapList(map, filter = '') {
+                const listEl = document.getElementById('buffMapList');
+                if (!listEl) return;
+
+                listEl.innerHTML = '';
+
+                const entries = Object.entries(map)
+                    .filter(([id, name]) => {
+                        if (!filter) return true;
+                        return id.includes(filter) || name.toLowerCase().includes(filter.toLowerCase());
+                    })
+                    .sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+
+                if (entries.length === 0) {
+                    listEl.innerHTML = '<div class="buff-map-empty">暂无映射数据</div>';
+                    return;
+                }
+
+                entries.forEach(([id, name]) => {
+                    const item = document.createElement('div');
+                    item.className = 'buff-map-item';
+                    item.innerHTML = `
+                        <div class="buff-map-item-info">
+                            <span class="buff-map-item-id">${id}</span>
+                            <span class="buff-map-item-name">${name}</span>
+                        </div>
+                        <div class="buff-map-item-actions">
+                            <button class="buff-map-edit-item-btn" onclick="editBuffMap('${id}', '${name.replace(/'/g, "\\'")}')">✏️</button>
+                            <button class="buff-map-delete-item-btn" onclick="deleteBuffMap('${id}')">🗑️</button>
+                        </div>
+                    `;
+                    listEl.appendChild(item);
+                });
+            }
+
+            function searchBuffMap(keyword) {
+                renderBuffMapList(currentBuffMap, keyword);
+            }
+
+            function openAddBuffMapModal() {
+                editingBuffMapId = null;
+                document.getElementById('buffMapEditTitle').textContent = '新增映射';
+                document.getElementById('buffMapEditId').value = '';
+                document.getElementById('buffMapEditId').disabled = false;
+                document.getElementById('buffMapEditName').value = '';
+                document.getElementById('buffMapEditModal').style.display = 'flex';
+            }
+
+            function editBuffMap(id, name) {
+                editingBuffMapId = id;
+                document.getElementById('buffMapEditTitle').textContent = '编辑映射';
+                document.getElementById('buffMapEditId').value = id;
+                document.getElementById('buffMapEditId').disabled = true;
+                document.getElementById('buffMapEditName').value = name;
+                document.getElementById('buffMapEditModal').style.display = 'flex';
+            }
+
+            function closeBuffMapEditModal() {
+                document.getElementById('buffMapEditModal').style.display = 'none';
+                editingBuffMapId = null;
+            }
+
+            async function saveBuffMap() {
+                const id = document.getElementById('buffMapEditId').value.trim();
+                const name = document.getElementById('buffMapEditName').value.trim();
+
+                if (!id || !name) {
+                    alert('请填写Buff ID和名称');
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/api/buffs/map', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id, name }),
+                    });
+                    const data = await response.json();
+                    if (data.code === 0) {
+                        closeBuffMapEditModal();
+                        await loadBuffMap();
+                    } else {
+                        alert(data.msg || '保存失败');
+                    }
+                } catch (error) {
+                    console.error('Failed to save buff map:', error);
+                    alert('保存失败');
+                }
+            }
+
+            async function deleteBuffMap(id) {
+                if (!confirm(`确定要删除映射 ${id} 吗？`)) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`/api/buffs/map/${id}`, {
+                        method: 'DELETE',
+                    });
+                    const data = await response.json();
+                    if (data.code === 0) {
+                        await loadBuffMap();
+                    } else {
+                        alert(data.msg || '删除失败');
+                    }
+                } catch (error) {
+                    console.error('Failed to delete buff map:', error);
+                    alert('删除失败');
+                }
+            }
+
+            // 初始化Buff配置按钮
+            function initBuffConfig() {
+                const configBtn = document.getElementById('buffConfigBtn');
+                if (configBtn) {
+                    configBtn.addEventListener('click', openBuffConfigModal);
+                }
+
+                const modal = document.getElementById('buffConfigModal');
+                if (modal) {
+                    modal.addEventListener('click', function (e) {
+                        if (e.target === modal) {
+                            closeBuffConfigModal();
+                        }
+                    });
+                }
+
+                const mapBtn = document.getElementById('buffMapBtn');
+                if (mapBtn) {
+                    mapBtn.addEventListener('click', openBuffMapModal);
+                }
+
+                const mapModal = document.getElementById('buffMapModal');
+                if (mapModal) {
+                    mapModal.addEventListener('click', function (e) {
+                        if (e.target === mapModal) {
+                            closeBuffMapModal();
+                        }
+                    });
+                }
+
+                const editModal = document.getElementById('buffMapEditModal');
+                if (editModal) {
+                    editModal.addEventListener('click', function (e) {
+                        if (e.target === editModal) {
+                            closeBuffMapEditModal();
+                        }
+                    });
+                }
+            }
+
+            // 初始化
+            function initialize() {
+                document.getElementById('appVersion').textContent = ` V${CURRENT_VERSION}`;
+                initTheme();
+                initFloatWindow();
+                initBuffConfig();
+                connectWebSocket();
+            }
+
+            document.addEventListener('DOMContentLoaded', initialize);
+        </script>
+    </body>
+</html>
