@@ -285,7 +285,11 @@ class PacketProcessor {
             if (isTargetPlayer) {
                 this._processPlayerAttrs(targetUuid.toNumber(), attrCollection.Attrs);
             } else if (isTargetMonster) {
-                this._processEnemyAttrs(tgtUuid, targetUuid.toNumber(), attrCollection.Attrs);
+                const monsterUid = targetUuid.toNumber();
+                if (this.userDataManager.buffMonitor) {
+                    this.userDataManager.buffMonitor.setMonsterEntity(monsterUid);
+                }
+                this._processEnemyAttrs(tgtUuid, monsterUid, attrCollection.Attrs);
             }
         }
 
@@ -295,7 +299,6 @@ class PacketProcessor {
             for (const BuffInfo of BuffInfos) {
                 try {
                     if (this.userDataManager.buffMonitor) {
-                        // 初始化全局buff状态map
                         if (!global.__BUFF_STATE_MAP__) {
                             global.__BUFF_STATE_MAP__ = new Map();
                         }
@@ -304,37 +307,73 @@ class PacketProcessor {
                         const baseId = BuffInfo.BaseId;
                         const key = `${entityUid}:${baseId}`;
 
-                        // 获取已保存的状态
                         const savedState = global.__BUFF_STATE_MAP__.get(key);
-
-                        // 更新全局状态（无论是否有Duration都更新layer）
-                        if (BuffInfo.Layer != null || BuffInfo.Duration != null) {
-                            global.__BUFF_STATE_MAP__.set(key, {
-                                layer: BuffInfo.Layer ?? savedState?.layer,
-                                durationMs: BuffInfo.Duration ?? savedState?.durationMs,
-                                count: BuffInfo.Count ?? savedState?.count,
-                                createTime: BuffInfo.CreateTime ?? savedState?.createTime,
-                            });
-                            this.logger.debug(
-                                `Updated buff state: ${key} Layer=${BuffInfo.Layer ?? savedState?.layer} Duration=${BuffInfo.Duration ?? savedState?.durationMs}`,
-                            );
+                        const newLayer = BuffInfo.Layer;
+                        const newDurationMs = BuffInfo.Duration;
+                        let newCreateTime = BuffInfo.CreateTime;
+                        if (newCreateTime && typeof newCreateTime === 'object' && newCreateTime.toNumber) {
+                            newCreateTime = newCreateTime.toNumber();
+                        }
+                        let savedCreateTime = savedState?.createTime;
+                        if (savedCreateTime && typeof savedCreateTime === 'object' && savedCreateTime.toNumber) {
+                            savedCreateTime = savedCreateTime.toNumber();
                         }
 
-                        const durationMs = BuffInfo.Duration ?? savedState?.durationMs ?? null;
+                        this.logger.info(
+                            `[BUFF-RAW] ${key} Layer=${newLayer} Duration=${newDurationMs} CreateTime=${newCreateTime} saved=${JSON.stringify(savedState)}`,
+                        );
 
-                        const buffEvent = {
-                            buffId: baseId,
-                            slot: BuffInfo.PartId,
-                            opType: 1,
-                            durationMs: durationMs,
-                            layer: BuffInfo.Layer ?? savedState?.layer,
-                            stack: BuffInfo.Count ?? savedState?.count,
-                            createTime: BuffInfo.CreateTime ?? savedState?.createTime,
-                        };
-                        const meta = {
-                            entityUid: entityUid,
-                        };
-                        this.userDataManager.buffMonitor.onBuffEvent(buffEvent, meta);
+                        if (newLayer === 0) {
+                            this.logger.info(`Buff consumed: ${key} layer=0`);
+                            global.__BUFF_STATE_MAP__.delete(key);
+
+                            const buffEvent = {
+                                buffId: baseId,
+                                slot: BuffInfo.PartId,
+                                opType: 2,
+                            };
+                            const meta = {
+                                entityUid: entityUid,
+                            };
+                            this.userDataManager.buffMonitor.onBuffEvent(buffEvent, meta);
+                            continue;
+                        }
+
+                        const isNewBuff = savedState == null;
+                        const savedLayer = savedState?.layer;
+                        const isLayerDecreased = savedLayer != null && newLayer != null && newLayer < savedLayer;
+                        const isBuffRefreshed =
+                            savedState != null && newCreateTime != null && savedCreateTime != null && newCreateTime !== savedCreateTime;
+                        const isDurationExtended = newDurationMs != null && savedState?.durationMs != null && newDurationMs > savedState.durationMs;
+
+                        if (isLayerDecreased && newLayer > 0) {
+                            this.logger.info(`Buff layer decreased: ${key} ${savedLayer} -> ${newLayer}`);
+                        }
+
+                        global.__BUFF_STATE_MAP__.set(key, {
+                            layer: newLayer ?? savedState?.layer,
+                            durationMs: newDurationMs ?? savedState?.durationMs,
+                            count: BuffInfo.Count ?? savedState?.count,
+                            createTime: newCreateTime ?? savedCreateTime,
+                        });
+
+                        if (isNewBuff || isBuffRefreshed || isDurationExtended) {
+                            const reason = isNewBuff ? 'new' : isBuffRefreshed ? 'refreshed' : 'extended';
+                            this.logger.info(`Buff update: ${key} reason=${reason} duration=${newDurationMs}`);
+                            const buffEvent = {
+                                buffId: baseId,
+                                slot: BuffInfo.PartId,
+                                opType: 1,
+                                durationMs: newDurationMs ?? savedState?.durationMs,
+                                layer: newLayer ?? savedState?.layer,
+                                stack: BuffInfo.Count ?? savedState?.count,
+                                createTime: newCreateTime ?? savedCreateTime,
+                            };
+                            const meta = {
+                                entityUid: entityUid,
+                            };
+                            this.userDataManager.buffMonitor.onBuffEvent(buffEvent, meta);
+                        }
                     }
                 } catch (buffErr) {
                     this.logger.debug(`BuffInfo parse error: ${buffErr.message}`);
@@ -531,27 +570,58 @@ class PacketProcessor {
 
             if (vData.Attr && vData.Attr.MaxHp) this.userDataManager.setAttrKV(playerUid, 'max_hp', vData.Attr.MaxHp.toNumber());
 
-            // 处理BuffDBInfo中的buff持续时间数据
             if (vData.BuffInfo && vData.BuffInfo.AllBuffDbData && this.userDataManager.buffMonitor) {
                 this.logger.debug(`Found BuffInfo with ${Object.keys(vData.BuffInfo.AllBuffDbData).length} buffs`);
                 const allBuffDbData = vData.BuffInfo.AllBuffDbData;
                 for (const buffUuid in allBuffDbData) {
                     const buffDbData = allBuffDbData[buffUuid];
-                    if (buffDbData && buffDbData.BaseId && buffDbData.Duration) {
-                        // 初始化全局buff状态map
+                    if (buffDbData && buffDbData.BaseId) {
                         if (!global.__BUFF_STATE_MAP__) {
                             global.__BUFF_STATE_MAP__ = new Map();
                         }
 
                         const key = `${playerUid}:${buffDbData.BaseId}`;
+                        const savedState = global.__BUFF_STATE_MAP__.get(key);
+                        const isNewBuff = savedState == null;
+                        const newDurationMs = buffDbData.Duration;
+                        let newCreateTime = buffDbData.CreateTime;
+                        if (newCreateTime && typeof newCreateTime === 'object' && newCreateTime.toNumber) {
+                            newCreateTime = newCreateTime.toNumber();
+                        }
+                        let savedCreateTime = savedState?.createTime;
+                        if (savedCreateTime && typeof savedCreateTime === 'object' && savedCreateTime.toNumber) {
+                            savedCreateTime = savedCreateTime.toNumber();
+                        }
+                        const isBuffRefreshed =
+                            savedState != null && newCreateTime != null && savedCreateTime != null && newCreateTime !== savedCreateTime;
+                        const isDurationExtended = newDurationMs != null && savedState?.durationMs != null && newDurationMs > savedState.durationMs;
+
                         global.__BUFF_STATE_MAP__.set(key, {
                             layer: buffDbData.Layer,
                             durationMs: buffDbData.Duration,
                             count: buffDbData.Count,
-                            createTime: buffDbData.CreateTime,
+                            createTime: newCreateTime,
                         });
 
-                        this.logger.debug(`BuffDBData: BaseId=${buffDbData.BaseId} Duration=${buffDbData.Duration} Layer=${buffDbData.Layer}`);
+                        if ((isNewBuff || isBuffRefreshed || isDurationExtended) && buffDbData.Duration > 0) {
+                            const reason = isNewBuff ? 'new' : isBuffRefreshed ? 'refreshed' : 'extended';
+                            this.logger.debug(
+                                `BuffDBData: BaseId=${buffDbData.BaseId} Duration=${buffDbData.Duration} Layer=${buffDbData.Layer} reason=${reason}`,
+                            );
+                            const buffEvent = {
+                                buffId: buffDbData.BaseId,
+                                slot: parseInt(buffUuid) || 0,
+                                opType: 1,
+                                durationMs: buffDbData.Duration,
+                                layer: buffDbData.Layer,
+                                stack: buffDbData.Count,
+                                createTime: newCreateTime,
+                            };
+                            const meta = {
+                                entityUid: playerUid,
+                            };
+                            this.userDataManager.buffMonitor.onBuffEvent(buffEvent, meta);
+                        }
                     }
                 }
             } else if (vData.BuffInfo) {

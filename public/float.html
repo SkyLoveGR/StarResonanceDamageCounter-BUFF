@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Buff浮窗</title>
+        <script src="socket.io.min.js"></script>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+                background: transparent;
+                color: #fff;
+                overflow: hidden;
+                -webkit-app-region: drag;
+            }
+
+            .float-container {
+                width: 100%;
+                height: 100vh;
+                background: rgba(30, 30, 45, 0.92);
+                border-radius: 8px;
+                display: flex;
+                flex-direction: column;
+                border: 1px solid rgba(102, 126, 234, 0.3);
+            }
+
+            .float-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 6px 10px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 8px 8px 0 0;
+                -webkit-app-region: drag;
+            }
+
+            .float-title {
+                font-size: 11px;
+                font-weight: 600;
+                color: #fff;
+            }
+
+            .float-controls {
+                display: flex;
+                gap: 5px;
+                -webkit-app-region: no-drag;
+            }
+
+            .float-btn {
+                padding: 4px 8px;
+                background: rgba(255, 255, 255, 0.2);
+                border: none;
+                border-radius: 4px;
+                color: white;
+                cursor: pointer;
+                font-size: 12px;
+            }
+
+            .float-btn:hover {
+                background: rgba(255, 255, 255, 0.3);
+            }
+
+            .btn-pin.active {
+                background: rgba(255, 255, 255, 0.4);
+            }
+
+            .float-content {
+                flex: 1;
+                overflow-y: auto;
+                overflow-x: auto;
+                padding: 6px;
+                -webkit-app-region: no-drag;
+            }
+
+            .filter-bar {
+                display: flex;
+                gap: 4px;
+                margin-bottom: 4px;
+                padding: 0 2px;
+            }
+
+            .filter-input {
+                flex: 1;
+                padding: 3px 6px;
+                border: 1px solid rgba(102, 126, 234, 0.3);
+                border-radius: 3px;
+                background: rgba(40, 40, 60, 0.8);
+                color: #fff;
+                font-size: 10px;
+                outline: none;
+            }
+
+            .filter-input::placeholder {
+                color: #888;
+            }
+
+            .filter-input:focus {
+                border-color: rgba(102, 126, 234, 0.6);
+            }
+
+            .buff-list-wrapper {
+                display: flex;
+                flex-direction: row;
+                flex-wrap: wrap;
+                gap: 6px;
+                min-width: max-content;
+            }
+
+            .float-content::-webkit-scrollbar {
+                width: 4px;
+                height: 4px;
+            }
+
+            .float-content::-webkit-scrollbar-thumb {
+                background: rgba(255, 255, 255, 0.3);
+                border-radius: 2px;
+            }
+
+            .buff-float-column {
+                display: flex;
+                flex-direction: column;
+                min-width: 100px;
+                max-width: 140px;
+                flex: 1 1 calc(20% - 6px);
+                max-height: calc(100vh - 80px);
+                background: rgba(50, 50, 70, 0.5);
+                border-radius: 4px;
+                overflow: hidden;
+            }
+
+            .buff-entity-header {
+                padding: 2px 4px;
+                background: rgba(102, 126, 234, 0.3);
+                font-size: 9px;
+                font-weight: 600;
+                color: #a8b4ff;
+                border-bottom: 1px solid rgba(102, 126, 234, 0.2);
+                text-align: center;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .buff-entity-container {
+                padding: 3px;
+                display: flex;
+                flex-direction: column;
+                gap: 3px;
+                overflow-y: auto;
+            }
+
+            .buff-item {
+                background: rgba(60, 60, 85, 0.7);
+                border-radius: 3px;
+                padding: 5px 8px;
+                margin-bottom: 3px;
+            }
+
+            .buff-item:last-child {
+                margin-bottom: 0;
+            }
+
+            .buff-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 4px;
+            }
+
+            .buff-name {
+                font-size: 11px;
+                font-weight: 600;
+                color: #fff;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .buff-info {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+            }
+
+            .buff-time {
+                font-size: 12px;
+                font-weight: bold;
+                color: #4caf50;
+                font-variant-numeric: tabular-nums;
+                min-width: 36px;
+                text-align: right;
+            }
+
+            .buff-progress-container {
+                height: 3px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 1px;
+                overflow: hidden;
+            }
+
+            .buff-progress-bar {
+                height: 100%;
+                border-radius: 2px;
+                transition:
+                    width 0.15s ease,
+                    background 0.3s ease;
+            }
+
+            .buff-progress-bar.buff-high {
+                background: linear-gradient(90deg, #4caf50, #81c784);
+            }
+
+            .buff-progress-bar.buff-medium {
+                background: linear-gradient(90deg, #ff9800, #ffb74d);
+            }
+
+            .buff-progress-bar.buff-low {
+                background: linear-gradient(90deg, #f44336, #e57373);
+            }
+
+            .buff-item.buff-weakness {
+                background: rgba(180, 180, 190, 0.7);
+                border: 1px solid rgba(200, 200, 210, 0.5);
+            }
+
+            .buff-item.buff-weakness .buff-name {
+                color: #555;
+            }
+
+            .buff-progress-bar.buff-weakness-high {
+                background: linear-gradient(90deg, #f44336, #e57373);
+            }
+
+            .buff-progress-bar.buff-weakness-low {
+                background: linear-gradient(90deg, #ff9800, #ffb74d);
+            }
+
+            .empty-state {
+                text-align: center;
+                padding: 20px;
+                color: #888;
+                font-size: 12px;
+            }
+
+            .opacity-slider {
+                position: absolute;
+                top: 100%;
+                right: 0;
+                background: rgba(40, 40, 60, 0.95);
+                padding: 8px;
+                border-radius: 4px;
+                display: none;
+                z-index: 100;
+            }
+
+            .opacity-slider.show {
+                display: block;
+            }
+
+            .opacity-slider input {
+                width: 80px;
+            }
+        </style>
+    </head>
+
+    <body>
+        <div class="float-container">
+            <div class="float-header">
+                <span class="float-title">✨ Buff</span>
+                <div class="float-controls">
+                    <button class="float-btn btn-pin" id="pinBtn" title="置顶">📌</button>
+                    <div style="position: relative">
+                        <button class="float-btn" id="opacityBtn" title="透明度">◐</button>
+                        <div class="opacity-slider" id="opacitySlider">
+                            <input type="range" min="30" max="100" value="92" id="opacityRange" />
+                        </div>
+                    </div>
+                    <button class="float-btn" id="closeBtn" title="关闭">✕</button>
+                </div>
+            </div>
+            <div class="float-content" id="buffContent">
+                <div class="filter-bar">
+                    <input type="text" class="filter-input" id="filterInput" placeholder="输入ID或名称筛选..." />
+                </div>
+                <div id="buffListContainer">
+                    <div class="empty-state">连接中...</div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const socket = io(window.location.origin, {
+                transports: ['websocket'],
+                reconnection: true,
+            });
+
+            let isPinned = true;
+            let currentOpacity = 0.92;
+            let currentFilter = '';
+            let lastBuffData = null;
+            let lastEntityUids = null;
+            let selectedEntityUids = new Set();
+            let userHasSelectedEntities = false;
+            let filterLoaded = false;
+
+            async function loadEntityFilter() {
+                try {
+                    const response = await fetch('/api/entity/filter');
+                    const result = await response.json();
+                    if (result.code === 0 && result.data) {
+                        if (result.data.selectedEntityUids) {
+                            selectedEntityUids = new Set(result.data.selectedEntityUids);
+                        }
+                        userHasSelectedEntities = result.data.userHasSelectedEntities || false;
+                    }
+                    filterLoaded = true;
+                } catch (error) {
+                    console.error('Failed to load entity filter:', error);
+                    filterLoaded = true;
+                }
+            }
+
+            loadEntityFilter();
+
+            socket.on('connect', async () => {
+                await loadEntityFilter();
+                document.getElementById('buffListContainer').innerHTML = '<div class="empty-state">等待Buff数据...</div>';
+            });
+
+            socket.on('disconnect', () => {
+                document.getElementById('buffListContainer').innerHTML = '<div class="empty-state">连接断开...</div>';
+            });
+
+            socket.on('data', async (data) => {
+                if (!filterLoaded) {
+                    await loadEntityFilter();
+                }
+                if (data.buff) {
+                    lastBuffData = data.buff;
+                    lastEntityUids = data.entityUids || [];
+                    renderBuffs(lastBuffData, lastEntityUids, currentFilter);
+                }
+            });
+
+            socket.on('entity-filter-changed', (data) => {
+                console.log('Received entity-filter-changed:', data);
+                if (data.selectedEntityUids) {
+                    selectedEntityUids = new Set(data.selectedEntityUids);
+                }
+                userHasSelectedEntities = data.userHasSelectedEntities || false;
+                console.log('Updated filter state:', { selectedEntityUids: Array.from(selectedEntityUids), userHasSelectedEntities });
+                if (lastBuffData) {
+                    renderBuffs(lastBuffData, lastEntityUids || [], currentFilter);
+                }
+            });
+
+            document.getElementById('filterInput').addEventListener('input', (e) => {
+                currentFilter = e.target.value.trim().toLowerCase();
+                if (lastBuffData) {
+                    renderBuffs(lastBuffData, lastEntityUids || [], currentFilter);
+                }
+            });
+
+            function renderBuffs(buffData, entityUids, filter) {
+                const container = document.getElementById('buffListContainer');
+                const entityInfoMap = {};
+
+                entityUids.forEach((entity) => {
+                    if (typeof entity === 'object') {
+                        entityInfoMap[entity.uid] = entity.name;
+                    } else {
+                        entityInfoMap[entity] = `角色${entity}`;
+                    }
+                });
+
+                Object.keys(buffData).forEach((uidStr) => {
+                    if (!entityInfoMap[uidStr]) {
+                        entityInfoMap[uidStr] = `角色${uidStr}`;
+                    }
+                });
+
+                let sortedEntityUids = Object.keys(buffData).sort((a, b) => parseInt(a) - parseInt(b));
+
+                // 应用主窗口的角色过滤
+                if (userHasSelectedEntities && selectedEntityUids.size > 0) {
+                    sortedEntityUids = sortedEntityUids.filter((uidStr) => selectedEntityUids.has(parseInt(uidStr)));
+                }
+
+                if (sortedEntityUids.length === 0) {
+                    container.innerHTML = '<div class="empty-state">暂无Buff</div>';
+                    return;
+                }
+
+                let html = '';
+                let hasContent = false;
+
+                for (const entityUidStr of sortedEntityUids) {
+                    const entityBuffs = buffData[entityUidStr];
+                    const entityName = entityInfoMap[entityUidStr] || `角色${entityUidStr}`;
+
+                    let filteredBuffs = Object.entries(entityBuffs);
+                    if (filter) {
+                        filteredBuffs = filteredBuffs.filter(([buffId, buffInfo]) => {
+                            const name = (buffInfo.name || '').toLowerCase();
+                            const id = String(buffId).toLowerCase();
+                            const entityNameLower = entityName.toLowerCase();
+                            return name.includes(filter) || id.includes(filter) || entityNameLower.includes(filter);
+                        });
+                    }
+
+                    if (filteredBuffs.length === 0) continue;
+
+                    if (!hasContent) {
+                        html = '<div class="buff-list-wrapper">';
+                        hasContent = true;
+                    }
+
+                    html += `<div class="buff-float-column">
+                        <div class="buff-entity-header">${entityName}</div>
+                        <div class="buff-entity-container">`;
+
+                    const sortedBuffs = filteredBuffs.sort((a, b) => {
+                        const remainingA = parseFloat(a[1].remainingSec || 0);
+                        const remainingB = parseFloat(b[1].remainingSec || 0);
+                        return remainingA - remainingB;
+                    });
+
+                    for (const [buffId, buffInfo] of sortedBuffs) {
+                        const progress = parseFloat(buffInfo.progress || 0) * 100;
+                        const remainingSec = parseFloat(buffInfo.remainingSec || 0);
+                        const isDebuff = buffInfo.isDebuff === true;
+
+                        let intensityClass = '';
+                        let itemClass = 'buff-item';
+
+                        if (isDebuff) {
+                            itemClass += ' buff-weakness';
+                            if (progress > 20) intensityClass = 'buff-weakness-high';
+                            else intensityClass = 'buff-weakness-low';
+                        } else {
+                            if (progress > 20) intensityClass = 'buff-high';
+                            else if (progress > 10) intensityClass = 'buff-medium';
+                            else intensityClass = 'buff-low';
+                        }
+
+                        const timeDisplay = formatTime(remainingSec);
+
+                        html += `
+                            <div class="${itemClass}">
+                                <div class="buff-header">
+                                    <span class="buff-name">${buffInfo.name}</span>
+                                    <span class="buff-info">
+                                        <span class="buff-time">${timeDisplay}</span>
+                                    </span>
+                                </div>
+                                <div class="buff-progress-container">
+                                    <div class="buff-progress-bar ${intensityClass}" style="width: ${progress.toFixed(1)}%"></div>
+                                </div>
+                            </div>`;
+                    }
+
+                    html += '</div></div>';
+                }
+
+                if (hasContent) {
+                    html += '</div>';
+                    container.innerHTML = html;
+                } else {
+                    container.innerHTML = '<div class="empty-state">未找到匹配的Buff</div>';
+                }
+            }
+
+            function formatTime(seconds) {
+                if (seconds >= 60) {
+                    const mins = Math.floor(seconds / 60);
+                    const secs = Math.floor(seconds % 60);
+                    return `${mins}:${secs.toString().padStart(2, '0')}`;
+                } else if (seconds >= 10) {
+                    return `${Math.floor(seconds)}s`;
+                } else {
+                    return `${seconds.toFixed(1)}s`;
+                }
+            }
+
+            document.getElementById('pinBtn').addEventListener('click', () => {
+                isPinned = !isPinned;
+                document.getElementById('pinBtn').classList.toggle('active', isPinned);
+                if (window.electronAPI) {
+                    window.electronAPI.setFloatAlwaysOnTop(isPinned);
+                }
+            });
+
+            document.getElementById('closeBtn').addEventListener('click', () => {
+                if (window.electronAPI) {
+                    window.electronAPI.closeFloatWindow();
+                }
+            });
+
+            document.getElementById('opacityBtn').addEventListener('click', () => {
+                document.getElementById('opacitySlider').classList.toggle('show');
+            });
+
+            document.getElementById('opacityRange').addEventListener('input', (e) => {
+                currentOpacity = e.target.value / 100;
+                if (window.electronAPI) {
+                    window.electronAPI.setFloatOpacity(currentOpacity);
+                }
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('#opacityBtn') && !e.target.closest('#opacitySlider')) {
+                    document.getElementById('opacitySlider').classList.remove('show');
+                }
+            });
+
+            if (window.electronAPI) {
+                document.getElementById('pinBtn').classList.add('active');
+            }
+        </script>
+    </body>
+</html>

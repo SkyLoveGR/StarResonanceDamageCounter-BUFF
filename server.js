@@ -27,11 +27,7 @@ try {
         decoders = cap.decoders;
         PROTOCOL = cap.decoders.PROTOCOL;
     }
-} catch (e) {
-    console.error(e);
-    console.log('\x1b[33mWarning: Failed to load PCAP module. Starting in mock mode without network capturing.\x1b[0m');
-}
-const print = console.log;
+} catch (e) {}
 const app = express();
 const { exec } = require('child_process');
 // 自动网络设备检测函数
@@ -84,7 +80,7 @@ let findDefaultNetworkDevice = async function (devices) {
 };
 
 const skillConfig = require('./tables/skill_names_new.json');
-const VERSION = '3.3.6';
+const VERSION = '1.0.0';
 const SETTINGS_PATH = path.join('./settings.json');
 let globalSettings = {
     autoClearOnServerChange: true,
@@ -102,8 +98,6 @@ const devices = cap ? cap.deviceList() : [];
 let isPaused = false;
 
 function warnAndExit(text) {
-    console.log(`\x1b[31m${text}\x1b[0m`);
-    fs.readSync(0, Buffer.alloc(1), 0, 1, null);
     process.exit(1);
 }
 
@@ -111,8 +105,6 @@ function safeRequireCap() {
     try {
         return require('cap');
     } catch (e) {
-        console.error(e);
-        console.log('\x1b[33mWarning: Failed to load PCAP module. Starting in mock mode without network capturing.\x1b[0m');
         return null;
     }
 }
@@ -1087,14 +1079,17 @@ class UserDataManager {
             const allBuffs = [];
             const seen = new Set();
             const enabledBuffs = this.buffMonitor.buffConfig.enabledBuffs;
-            const allEnabled = enabledBuffs.size === 0;
+            const hasUserConfig = this.buffMonitor.buffConfig.hasUserConfig;
 
-            for (const [id, name] of Object.entries(this.buffMonitor.buffMap)) {
+            for (const [id, buffInfo] of Object.entries(this.buffMonitor.buffMap)) {
                 if (!seen.has(id)) {
+                    const name = typeof buffInfo === 'object' ? buffInfo.name : buffInfo;
+                    const isDebuff = typeof buffInfo === 'object' ? buffInfo.isDebuff === true : false;
                     allBuffs.push({
                         id,
                         name,
-                        enabled: allEnabled || enabledBuffs.has(id),
+                        isDebuff,
+                        enabled: !hasUserConfig || enabledBuffs.has(id),
                         mapped: true,
                     });
                     seen.add(id);
@@ -1106,7 +1101,8 @@ class UserDataManager {
                     allBuffs.push({
                         id,
                         name: '(未映射)',
-                        enabled: allEnabled || enabledBuffs.has(id),
+                        isDebuff: false,
+                        enabled: !hasUserConfig || enabledBuffs.has(id),
                         mapped: false,
                     });
                     seen.add(id);
@@ -1196,9 +1192,9 @@ class UserDataManager {
     }
 
     /** 设置buff映射 */
-    setBuffMap(id, name) {
+    setBuffMap(id, name, isDebuff = false) {
         if (this.buffMonitor) {
-            this.buffMonitor.buffMap[id] = name;
+            this.buffMonitor.buffMap[id] = { name, isDebuff };
             this.buffMonitor.saveBuffMap();
             return { code: 0, msg: '映射设置成功' };
         }
@@ -1282,78 +1278,47 @@ class UserDataManager {
 }
 
 async function main() {
-    print('Welcome to use Damage Counter for Star Resonance!');
-    print(`Version: V${VERSION}`);
-    print('GitHub: https://github.com/dmlgzs/StarResonanceDamageCounter');
-
-    // 从命令行参数获取设备号和日志级别
     const args = process.argv.slice(2);
     let num = args[0];
-    let log_level = args[1];
+    let log_level = args[1] || 'info';
 
-    // 如果cap为null，进入模拟模式
     if (!cap) {
-        print('\x1b[33mStarting in mock mode without network capturing.\x1b[0m');
-        log_level = log_level || 'info';
         rl.close();
         await startServer(log_level);
         return;
     }
 
-    // 显示可用设备
     let recommendedDevice = null;
     if (cap && findDefaultNetworkDevice) {
         recommendedDevice = await findDefaultNetworkDevice(devices);
     }
-    for (let i = 0; i < devices.length; i++) {
-        const isRecommended = recommendedDevice === i;
-        const marker = isRecommended ? ' \x1b[32m(推荐)\x1b[0m' : '';
-        print(String(i).padStart(2, ' ') + '.' + (devices[i].description || devices[i].name) + marker);
-    }
-    if (recommendedDevice !== null) {
-        print('\x1b[36m提示: 推荐选择标记为"(推荐)"的网卡，通常是你当前使用的网络连接\x1b[0m');
-    }
 
     if (num === 'auto' && cap && findDefaultNetworkDevice) {
-        print('Auto detecting default network interface...');
         const device_num = await findDefaultNetworkDevice(devices);
         if (device_num) {
             num = device_num;
-            print(`Using network interface: ${num} - ${devices[num].description}`);
         } else {
-            print('Default network interface not found!');
             num = undefined;
         }
     }
 
-    // 参数验证函数
     function isValidLogLevel(level) {
         return ['info', 'debug'].includes(level);
     }
 
-    // 如果命令行没传或者不合法，使用交互
     while (num === undefined || !devices[num]) {
         num = await ask('Please enter the number of the device to capture: ');
         if (!num && cap && findDefaultNetworkDevice) {
-            print('Auto detecting default network interface...');
             const device_num = await findDefaultNetworkDevice(devices);
             if (device_num) {
                 num = device_num;
-                print(`Using network interface: ${num} - ${devices[num].description}`);
             } else {
-                print('Default network interface not found!');
                 num = undefined;
             }
-        }
-        if (!devices[num]) {
-            print('Cannot find device ' + num + '!');
         }
     }
     while (log_level === undefined || !isValidLogLevel(log_level)) {
         log_level = (await ask('Please enter log level (info|debug): ')) || 'info';
-        if (!isValidLogLevel(log_level)) {
-            print('Invalid log level!');
-        }
     }
 
     rl.close();
@@ -1515,12 +1480,40 @@ async function startServer(log_level, num) {
         }
     });
 
+    // 角色过滤配置
+    const ENTITY_FILTER_PATH = path.join('./data/entity_filter.json');
+
+    app.get('/api/entity/filter', (req, res) => {
+        try {
+            if (fs.existsSync(ENTITY_FILTER_PATH)) {
+                const data = JSON.parse(fs.readFileSync(ENTITY_FILTER_PATH, 'utf-8'));
+                res.json({ code: 0, data });
+            } else {
+                res.json({ code: 0, data: { selectedEntityUids: [], userHasSelectedEntities: false } });
+            }
+        } catch (error) {
+            res.json({ code: 1, msg: error.message });
+        }
+    });
+
+    app.post('/api/entity/filter', (req, res) => {
+        try {
+            const { selectedEntityUids, userHasSelectedEntities } = req.body;
+            const data = { selectedEntityUids, userHasSelectedEntities };
+            fs.writeFileSync(ENTITY_FILTER_PATH, JSON.stringify(data, null, 2));
+            io.emit('entity-filter-changed', data);
+            res.json({ code: 0, msg: '保存成功' });
+        } catch (error) {
+            res.json({ code: 1, msg: error.message });
+        }
+    });
+
     app.post('/api/buffs/map', (req, res) => {
-        const { id, name } = req.body;
+        const { id, name, isDebuff } = req.body;
         if (!id || !name) {
             return res.json({ code: 1, msg: '缺少id或name参数' });
         }
-        const result = userDataManager.setBuffMap(id, name);
+        const result = userDataManager.setBuffMap(id, name, isDebuff === true);
         res.json(result);
     });
 
@@ -1532,11 +1525,11 @@ async function startServer(log_level, num) {
 
     app.put('/api/buffs/map/:id', (req, res) => {
         const { id } = req.params;
-        const { name } = req.body;
+        const { name, isDebuff } = req.body;
         if (!name) {
             return res.json({ code: 1, msg: '缺少name参数' });
         }
-        const result = userDataManager.setBuffMap(id, name);
+        const result = userDataManager.setBuffMap(id, name, isDebuff === true);
         res.json(result);
     });
 
@@ -1801,29 +1794,31 @@ async function startServer(log_level, num) {
         server_port++;
     }
     server.listen(server_port, () => {
-        // 自动用默认浏览器打开网页（跨平台兼容）
         const url = 'http://localhost:' + server_port;
         logger.info(`Web Server started at ${url}`);
         logger.info('WebSocket Server started');
 
-        let command;
-        switch (process.platform) {
-            case 'darwin': // macOS
-                command = `open ${url}`;
-                break;
-            case 'win32': // Windows
-                command = `start ${url}`;
-                break;
-            default: // Linux 和其他 Unix-like 系统
-                command = `xdg-open ${url}`;
-                break;
-        }
-
-        exec(command, (error) => {
-            if (error) {
-                logger.error(`Failed to open browser: ${error.message}`);
+        // 只在非 Electron 模式下自动打开浏览器
+        if (!process.env.ELECTRON_RUN_AS_NODE && !process.versions.electron) {
+            let command;
+            switch (process.platform) {
+                case 'darwin':
+                    command = `open ${url}`;
+                    break;
+                case 'win32':
+                    command = `start ${url}`;
+                    break;
+                default:
+                    command = `xdg-open ${url}`;
+                    break;
             }
-        });
+
+            exec(command, (error) => {
+                if (error) {
+                    logger.error(`Failed to open browser: ${error.message}`);
+                }
+            });
+        }
     });
 
     logger.info('Welcome!');

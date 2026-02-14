@@ -1660,6 +1660,61 @@ tr:nth-child(even) {
     background: linear-gradient(90deg, #f44336, #e57373);
 }
 
+.buff-item.buff-weakness {
+    background: rgba(220, 220, 230, 0.9);
+    border-color: rgba(180, 180, 190, 0.6);
+}
+
+.buff-item.buff-weakness .buff-name {
+    color: #555;
+}
+
+.buff-item.buff-weakness .buff-info {
+    color: #666;
+}
+
+.buff-item.buff-weakness .buff-stack {
+    background: rgba(150, 150, 160, 0.15);
+    color: #666;
+}
+
+.buff-progress-bar.buff-weakness-high {
+    background: linear-gradient(90deg, #f44336, #e57373);
+}
+
+.buff-progress-bar.buff-weakness-low {
+    background: linear-gradient(90deg, #ff9800, #ffb74d);
+}
+
+.buff-map-debuff-tag {
+    background: rgba(244, 67, 54, 0.15);
+    color: #e57373;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    margin-left: 8px;
+}
+
+.buff-map-item.buff-map-debuff {
+    background: rgba(244, 67, 54, 0.05);
+    border-color: rgba(244, 67, 54, 0.2);
+}
+
+.buff-map-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #333;
+}
+
+.buff-map-checkbox-label input[type='checkbox'] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
 .buff-progress-container {
     position: relative;
     height: 4px;
@@ -1741,6 +1796,46 @@ tr:nth-child(even) {
 
 .dark-mode .buff-progress-bar.buff-low {
     background: linear-gradient(90deg, #ef5350, #e57373);
+}
+
+.dark-mode .buff-item.buff-weakness {
+    background: rgba(100, 100, 110, 0.8);
+    border-color: rgba(130, 130, 140, 0.5);
+}
+
+.dark-mode .buff-item.buff-weakness .buff-name {
+    color: #ccc;
+}
+
+.dark-mode .buff-item.buff-weakness .buff-info {
+    color: #aaa;
+}
+
+.dark-mode .buff-item.buff-weakness .buff-stack {
+    background: rgba(150, 150, 160, 0.25);
+    color: #bbb;
+}
+
+.dark-mode .buff-progress-bar.buff-weakness-high {
+    background: linear-gradient(90deg, #ef5350, #e57373);
+}
+
+.dark-mode .buff-progress-bar.buff-weakness-low {
+    background: linear-gradient(90deg, #ffb74d, #ffcc80);
+}
+
+.dark-mode .buff-map-debuff-tag {
+    background: rgba(244, 67, 54, 0.25);
+    color: #ef9a9a;
+}
+
+.dark-mode .buff-map-item.buff-map-debuff {
+    background: rgba(244, 67, 54, 0.1);
+    border-color: rgba(244, 67, 54, 0.3);
+}
+
+.dark-mode .buff-map-checkbox-label {
+    color: #e0e0e0;
 }
 
 .dark-mode .buff-empty {

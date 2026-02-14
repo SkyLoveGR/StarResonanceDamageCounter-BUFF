@@ -12,7 +12,9 @@
         <div style="margin: 20px 0"></div>
         <button class="main-button" onclick="toggleDarkMode()">🌙 夜间模式</button>
         <button class="main-button" onclick="clearUserCache()">🗑️ 清空缓存</button>
-        <button class="main-button" onclick="toggleBuffFloat()">📺 显示/隐藏浮窗</button>
+        <button class="main-button" id="showUnmappedBtn" onclick="toggleShowUnmappedBuffs()">👁️ 显示未映射Buff</button>
+        <button class="main-button" id="floatBtn" onclick="toggleBuffFloat()">📺 显示/隐藏浮窗</button>
+        <button class="main-button" id="electronFloatBtn" onclick="openElectronFloat()" style="display: none">🪟 独立浮窗</button>
 
         <!-- 服务器状态提示 -->
         <div id="serverStatus" class="server-status">
@@ -107,10 +109,6 @@
                         <input type="text" id="buffSearchInput" placeholder="搜索Buff (ID或名称)..." oninput="searchBuffs(this.value)" />
                     </div>
                     <div class="buff-config-options">
-                        <label class="buff-config-option">
-                            <input type="checkbox" id="showUnmappedBuffs" onchange="toggleShowUnmapped(this.checked)" />
-                            <span>显示未映射的Buff</span>
-                        </label>
                         <div class="buff-config-buttons">
                             <button class="buff-config-btn-small" onclick="selectAllBuffs(true)">全选</button>
                             <button class="buff-config-btn-small" onclick="selectAllBuffs(false)">全不选</button>
@@ -161,6 +159,12 @@
                         <label>名称:</label>
                         <input type="text" id="buffMapEditName" placeholder="输入Buff名称" />
                     </div>
+                    <div class="buff-map-edit-row">
+                        <label class="buff-map-checkbox-label">
+                            <input type="checkbox" id="buffMapEditDebuff" />
+                            <span>是否为Debuff（虚弱类负面效果）</span>
+                        </label>
+                    </div>
                     <div class="buff-map-edit-actions">
                         <button class="buff-map-save-btn" onclick="saveBuffMap()">保存</button>
                         <button class="buff-map-cancel-btn" onclick="closeBuffMapEditModal()">取消</button>
@@ -171,12 +175,11 @@
 
         <footer style="margin-top: 40px; font-size: 14px; color: #888">
             <span id="appVersion"></span>
-            <span> | © 2025 Made with ❤️ by </span>
-            <a href="https://github.com/dmlgzs/" target="_blank">Dimole</a>
+            <span> | © 2026 Made with ❤️ by Sky</span>
         </footer>
 
         <script>
-            const CURRENT_VERSION = '3.3.6';
+            const CURRENT_VERSION = '1.0.0';
 
             // WebSocket连接相关变量
             let socket = null;
@@ -555,9 +558,9 @@
                 if (checked) {
                     Object.keys(entityInfoMap).forEach((uidStr) => selectedEntityUids.add(parseInt(uidStr)));
                 }
-                userHasSelectedEntities = !checked; // 如果选中全部角色，重置为false；否则标记为用户手动选择
+                userHasSelectedEntities = !checked;
                 updateMultiSelectText();
-                // 更新网页主体的选项
+                saveEntityFilter();
                 const options = document.querySelectorAll('#buffMultiselectOptions input[type="checkbox"]');
                 options.forEach((cb) => (cb.checked = checked));
                 // 更新浮窗的选项
@@ -572,13 +575,43 @@
                 } else {
                     selectedEntityUids.delete(numUid);
                 }
-                userHasSelectedEntities = true; // 标记用户已手动选择
+                userHasSelectedEntities = true;
                 updateMultiSelectText();
-                // 同步更新两个地方的checkbox状态
+                saveEntityFilter();
                 const mainCb = document.querySelector(`#buffMultiselectOptions input[value="${uid}"]`);
                 if (mainCb) mainCb.checked = checked;
                 const floatCb = document.querySelector(`#buffFloatMultiselectOptions input[value="${uid}"]`);
                 if (floatCb) floatCb.checked = checked;
+            }
+
+            async function saveEntityFilter() {
+                try {
+                    await fetch('/api/entity/filter', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            selectedEntityUids: Array.from(selectedEntityUids),
+                            userHasSelectedEntities: userHasSelectedEntities,
+                        }),
+                    });
+                } catch (error) {
+                    console.error('Failed to save entity filter:', error);
+                }
+            }
+
+            async function loadEntityFilter() {
+                try {
+                    const response = await fetch('/api/entity/filter');
+                    const result = await response.json();
+                    if (result.code === 0 && result.data) {
+                        if (result.data.selectedEntityUids) {
+                            selectedEntityUids = new Set(result.data.selectedEntityUids);
+                        }
+                        userHasSelectedEntities = result.data.userHasSelectedEntities || false;
+                    }
+                } catch (error) {
+                    console.error('Failed to load entity filter:', error);
+                }
             }
 
             function updateMultiSelectText() {
@@ -735,11 +768,18 @@
 
                             const progress = parseFloat(buffInfo.progress || 0) * 100;
                             const remainingSec = parseFloat(buffInfo.remainingSec || 0);
+                            const isDebuff = buffInfo.isDebuff === true;
 
                             let intensityClass = '';
-                            if (progress > 70) intensityClass = 'buff-high';
-                            else if (progress > 30) intensityClass = 'buff-medium';
-                            else intensityClass = 'buff-low';
+                            if (isDebuff) {
+                                buffItem.classList.add('buff-weakness');
+                                if (progress > 20) intensityClass = 'buff-weakness-high';
+                                else intensityClass = 'buff-weakness-low';
+                            } else {
+                                if (progress > 20) intensityClass = 'buff-high';
+                                else if (progress > 10) intensityClass = 'buff-medium';
+                                else intensityClass = 'buff-low';
+                            }
 
                             buffItem.innerHTML = `
                                 <div class="buff-header">
@@ -781,11 +821,18 @@
                             const progress = parseFloat(buffInfo.progress || 0) * 100;
                             const remainingSec = parseFloat(buffInfo.remainingSec || 0);
                             const totalDurationSec = parseFloat(buffInfo.totalDurationSec || 0);
+                            const isDebuff = buffInfo.isDebuff === true;
 
                             let intensityClass = '';
-                            if (progress > 70) intensityClass = 'buff-high';
-                            else if (progress > 30) intensityClass = 'buff-medium';
-                            else intensityClass = 'buff-low';
+                            if (isDebuff) {
+                                buffItem.classList.add('buff-weakness');
+                                if (progress > 20) intensityClass = 'buff-weakness-high';
+                                else intensityClass = 'buff-weakness-low';
+                            } else {
+                                if (progress > 20) intensityClass = 'buff-high';
+                                else if (progress > 10) intensityClass = 'buff-medium';
+                                else intensityClass = 'buff-low';
+                            }
 
                             buffItem.innerHTML = `
                                 <div class="buff-header">
@@ -829,28 +876,14 @@
                 }
             }
 
-            async function loadBuffConfigState() {
-                try {
-                    const response = await fetch('/api/buffs/config');
-                    const data = await response.json();
-                    if (data.code === 0 && data.config) {
-                        const showUnmappedCheckbox = document.getElementById('showUnmappedBuffs');
-                        if (showUnmappedCheckbox) {
-                            showUnmappedCheckbox.checked = data.config.showUnmapped ?? false;
-                        }
-                    }
-                } catch (error) {
-                    console.error('Failed to load buff config state:', error);
-                }
-            }
+            async function loadBuffConfigState() {}
 
             async function loadBuffConfig() {
                 try {
                     const response = await fetch('/api/buffs/all');
                     const data = await response.json();
                     const allBuffs = data.buffs || [];
-                    const showUnmapped = document.getElementById('showUnmappedBuffs')?.checked ?? false;
-                    const buffs = showUnmapped ? allBuffs : allBuffs.filter((b) => b.mapped);
+                    const buffs = allBuffs.filter((b) => b.mapped);
                     renderBuffConfigList(buffs);
                 } catch (error) {
                     console.error('Failed to load buff config:', error);
@@ -887,8 +920,7 @@
                     const response = await fetch(`/api/buffs/search?q=${encodeURIComponent(keyword)}`);
                     const data = await response.json();
                     const allResults = data.results || [];
-                    const showUnmapped = document.getElementById('showUnmappedBuffs')?.checked ?? false;
-                    const buffs = showUnmapped ? allResults : allResults.filter((b) => b.mapped);
+                    const buffs = allResults.filter((b) => b.mapped);
                     renderBuffConfigList(buffs);
                 } catch (error) {
                     console.error('Failed to search buffs:', error);
@@ -907,14 +939,43 @@
                 }
             }
 
-            async function toggleShowUnmapped(show) {
+            let showUnmappedBuffs = false;
+
+            async function loadShowUnmappedState() {
+                try {
+                    const response = await fetch('/api/buffs/config');
+                    const data = await response.json();
+                    if (data.code === 0 && data.config) {
+                        showUnmappedBuffs = data.config.showUnmapped ?? false;
+                        updateShowUnmappedButton();
+                    }
+                } catch (error) {
+                    console.error('Failed to load show unmapped state:', error);
+                }
+            }
+
+            function updateShowUnmappedButton() {
+                const btn = document.getElementById('showUnmappedBtn');
+                if (btn) {
+                    if (showUnmappedBuffs) {
+                        btn.style.background = 'linear-gradient(135deg, #4caf50, #81c784)';
+                        btn.textContent = '👁️ 已显示未映射';
+                    } else {
+                        btn.style.background = '';
+                        btn.textContent = '👁️ 显示未映射Buff';
+                    }
+                }
+            }
+
+            async function toggleShowUnmappedBuffs() {
+                showUnmappedBuffs = !showUnmappedBuffs;
                 try {
                     await fetch('/api/buffs/config/unmapped', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ show }),
+                        body: JSON.stringify({ show: showUnmappedBuffs }),
                     });
-                    await loadBuffConfig();
+                    updateShowUnmappedButton();
                 } catch (error) {
                     console.error('Failed to toggle show unmapped:', error);
                 }
@@ -972,7 +1033,8 @@
                 listEl.innerHTML = '';
 
                 const entries = Object.entries(map)
-                    .filter(([id, name]) => {
+                    .filter(([id, info]) => {
+                        const name = typeof info === 'object' ? info.name : info;
                         if (!filter) return true;
                         return id.includes(filter) || name.toLowerCase().includes(filter.toLowerCase());
                     })
@@ -983,16 +1045,19 @@
                     return;
                 }
 
-                entries.forEach(([id, name]) => {
+                entries.forEach(([id, info]) => {
+                    const name = typeof info === 'object' ? info.name : info;
+                    const isDebuff = typeof info === 'object' ? info.isDebuff === true : false;
                     const item = document.createElement('div');
-                    item.className = 'buff-map-item';
+                    item.className = 'buff-map-item' + (isDebuff ? ' buff-map-debuff' : '');
                     item.innerHTML = `
                         <div class="buff-map-item-info">
                             <span class="buff-map-item-id">${id}</span>
                             <span class="buff-map-item-name">${name}</span>
+                            ${isDebuff ? '<span class="buff-map-debuff-tag">Debuff</span>' : ''}
                         </div>
                         <div class="buff-map-item-actions">
-                            <button class="buff-map-edit-item-btn" onclick="editBuffMap('${id}', '${name.replace(/'/g, "\\'")}')">✏️</button>
+                            <button class="buff-map-edit-item-btn" onclick="editBuffMap('${id}', '${name.replace(/'/g, "\\'")}', ${isDebuff})">✏️</button>
                             <button class="buff-map-delete-item-btn" onclick="deleteBuffMap('${id}')">🗑️</button>
                         </div>
                     `;
@@ -1010,15 +1075,17 @@
                 document.getElementById('buffMapEditId').value = '';
                 document.getElementById('buffMapEditId').disabled = false;
                 document.getElementById('buffMapEditName').value = '';
+                document.getElementById('buffMapEditDebuff').checked = false;
                 document.getElementById('buffMapEditModal').style.display = 'flex';
             }
 
-            function editBuffMap(id, name) {
+            function editBuffMap(id, name, isDebuff) {
                 editingBuffMapId = id;
                 document.getElementById('buffMapEditTitle').textContent = '编辑映射';
                 document.getElementById('buffMapEditId').value = id;
                 document.getElementById('buffMapEditId').disabled = true;
                 document.getElementById('buffMapEditName').value = name;
+                document.getElementById('buffMapEditDebuff').checked = isDebuff === true;
                 document.getElementById('buffMapEditModal').style.display = 'flex';
             }
 
@@ -1030,6 +1097,7 @@
             async function saveBuffMap() {
                 const id = document.getElementById('buffMapEditId').value.trim();
                 const name = document.getElementById('buffMapEditName').value.trim();
+                const isDebuff = document.getElementById('buffMapEditDebuff').checked;
 
                 if (!id || !name) {
                     alert('请填写Buff ID和名称');
@@ -1040,7 +1108,7 @@
                     const response = await fetch('/api/buffs/map', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id, name }),
+                        body: JSON.stringify({ id, name, isDebuff }),
                     });
                     const data = await response.json();
                     if (data.code === 0) {
@@ -1116,13 +1184,48 @@
                 }
             }
 
+            // Electron 独立浮窗功能
+            function openElectronFloat() {
+                if (window.electronAPI) {
+                    window.electronAPI.createFloatWindow();
+                }
+            }
+
+            function closeElectronFloat() {
+                if (window.electronAPI) {
+                    window.electronAPI.closeFloatWindow();
+                }
+            }
+
+            function isElectron() {
+                return window.electronAPI && window.electronAPI.isElectron;
+            }
+
             // 初始化
             function initialize() {
                 document.getElementById('appVersion').textContent = ` V${CURRENT_VERSION}`;
                 initTheme();
                 initFloatWindow();
                 initBuffConfig();
-                connectWebSocket();
+                loadShowUnmappedState();
+                loadEntityFilter().then(() => {
+                    connectWebSocket();
+                });
+
+                // 检测 URL hash 自动打开配置
+                if (window.location.hash === '#buff-config') {
+                    setTimeout(() => {
+                        openBuffConfigModal();
+                    }, 500);
+                }
+
+                // 检测 Electron 环境
+                if (isElectron()) {
+                    const floatBtn = document.getElementById('floatBtn');
+                    const electronFloatBtn = document.getElementById('electronFloatBtn');
+                    if (floatBtn) floatBtn.style.display = 'none';
+                    if (electronFloatBtn) electronFloatBtn.style.display = 'inline-block';
+                }
             }
 
             document.addEventListener('DOMContentLoaded', initialize);

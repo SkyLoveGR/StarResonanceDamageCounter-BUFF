@@ -85,6 +85,7 @@ class BuffMonitor {
         this.slotLastBuffId = new Map();
         this.slotToEntity = new Map();
         this.overlayDirty = false;
+        this.monsterEntities = new Set();
 
         const dataDir = path.join(__dirname, '../data');
         if (!fs.existsSync(dataDir)) {
@@ -102,11 +103,36 @@ class BuffMonitor {
         }, 80);
     }
 
+    setMonsterEntity(entityUid) {
+        this.monsterEntities.add(entityUid);
+    }
+
+    isMonsterEntity(entityUid) {
+        return this.monsterEntities.has(entityUid);
+    }
+
+    getBuffName(buffId) {
+        const buffInfo = this.buffMap[buffId];
+        if (typeof buffInfo === 'object') {
+            return buffInfo.name || '(未映射)';
+        }
+        return buffInfo || '(未映射)';
+    }
+
+    getBuffDebuff(buffId) {
+        const buffInfo = this.buffMap[buffId];
+        if (typeof buffInfo === 'object') {
+            return buffInfo.isDebuff === true;
+        }
+        return false;
+    }
+
     loadBuffConfig() {
-        const config = loadJson(BUFF_CONFIG_PATH, { enabledBuffs: [], showUnmapped: false });
+        const config = loadJson(BUFF_CONFIG_PATH, { enabledBuffs: [], showUnmapped: false, hasUserConfig: false });
         return {
             enabledBuffs: new Set(config.enabledBuffs || []),
             showUnmapped: config.showUnmapped === true,
+            hasUserConfig: config.hasUserConfig === true,
         };
     }
 
@@ -114,11 +140,13 @@ class BuffMonitor {
         const config = {
             enabledBuffs: Array.from(this.buffConfig.enabledBuffs),
             showUnmapped: this.buffConfig.showUnmapped,
+            hasUserConfig: this.buffConfig.hasUserConfig,
         };
         saveJson(BUFF_CONFIG_PATH, config);
     }
 
     setBuffEnabled(buffId, enabled) {
+        this.buffConfig.hasUserConfig = true;
         if (enabled) {
             this.buffConfig.enabledBuffs.add(buffId);
         } else {
@@ -133,8 +161,9 @@ class BuffMonitor {
     }
 
     selectAllBuffs(enabled) {
+        this.buffConfig.hasUserConfig = true;
         if (enabled) {
-            for (const [id, name] of Object.entries(this.buffMap)) {
+            for (const id of Object.keys(this.buffMap)) {
                 this.buffConfig.enabledBuffs.add(id);
             }
         } else {
@@ -144,10 +173,13 @@ class BuffMonitor {
     }
 
     isBuffEnabled(buffId, name) {
-        if (name === '(未映射)' && !this.buffConfig.showUnmapped) {
-            return false;
+        const isUnmapped = name === '(未映射)';
+
+        if (isUnmapped) {
+            return this.buffConfig.showUnmapped === true;
         }
-        if (this.buffConfig.enabledBuffs.size === 0) {
+
+        if (!this.buffConfig.hasUserConfig) {
             return true;
         }
         return this.buffConfig.enabledBuffs.has(buffId);
@@ -157,16 +189,18 @@ class BuffMonitor {
         const results = [];
         const lowerKeyword = keyword.toLowerCase();
 
-        for (const [id, name] of Object.entries(this.buffMap)) {
+        for (const [id, buffInfo] of Object.entries(this.buffMap)) {
+            const name = typeof buffInfo === 'object' ? buffInfo.name : buffInfo;
+            const isDebuff = typeof buffInfo === 'object' ? buffInfo.isDebuff === true : false;
             if (id.includes(keyword) || name.toLowerCase().includes(lowerKeyword)) {
-                results.push({ id, name, enabled: this.buffConfig.enabledBuffs.has(id), mapped: true });
+                results.push({ id, name, isDebuff, enabled: this.buffConfig.enabledBuffs.has(id), mapped: true });
             }
         }
 
         for (const [id, info] of Object.entries(this.buffSeen)) {
             if (!this.buffMap[id]) {
                 if (id.includes(keyword)) {
-                    results.push({ id, name: '(未映射)', enabled: this.buffConfig.enabledBuffs.has(id), mapped: false });
+                    results.push({ id, name: '(未映射)', isDebuff: false, enabled: this.buffConfig.enabledBuffs.has(id), mapped: false });
                 }
             }
         }
@@ -189,7 +223,7 @@ class BuffMonitor {
             if (!trustedId) return;
 
             const idStr = String(trustedId);
-            const name = this.buffMap[idStr] ?? '(未映射)';
+            const name = this.getBuffName(idStr);
             this.logger.info(`[BUFF-] uid=${entityUid} buffId=${idStr} name=${name} slot=${ev.slot} op=${ev.opType}`);
 
             const entityUidFromSlot = this.slotToEntity.get(ev.slot);
@@ -225,28 +259,31 @@ class BuffMonitor {
             }
             this.buffSeen[idStr].count++;
 
-            const name = this.buffMap[idStr] ?? '(未映射)';
+            const name = this.getBuffName(idStr);
 
             const key = `${entityUid}:${idStr}`;
             const s = global.__BUFF_STATE_MAP__?.get(key);
             if (s) {
                 if (s.layer != null) ev.layer = s.layer;
-                if (s.durationMs != null) ev.durationMs = s.durationMs;
+                if (s.durationMs != null && s.durationMs > 0) {
+                    ev.durationMs = s.durationMs;
+                }
             }
 
-            const durationMs = ev.durationMs ?? 0;
-            const durationSec = durationMs / 1000;
+            const finalDurationMs = ev.durationMs ?? 0;
+            const finalDurationSec = finalDurationMs / 1000;
 
-            if (durationMs <= 0) {
-                this.logger.debug(`[BUFF] Skipping buff ${idStr} with duration ${durationSec.toFixed(1)}s (no duration or <=0s)`);
+            if (finalDurationMs <= 0) {
+                this.logger.debug(`[BUFF] Skipping buff ${idStr} with duration ${finalDurationSec.toFixed(1)}s (no duration or <=0s)`);
                 return;
             }
 
-            const durUntil = durationMs > 0 ? Date.now() + durationMs : 0;
-            const startTime = Date.now();
+            const now = Date.now();
+            const durUntil = finalDurationMs > 0 ? now + finalDurationMs : 0;
+            const startTime = now;
 
             this.logger.info(
-                `[BUFF+] uid=${entityUid} buffId=${idStr} name=${name} slot=${ev.slot} dur=${durationSec.toFixed(1)}s durUntil=${durUntil} stack=${ev.layer ?? ev.stack ?? 1} op=${ev.opType}`,
+                `[BUFF+] uid=${entityUid} buffId=${idStr} name=${name} slot=${ev.slot} dur=${finalDurationSec.toFixed(1)}s durUntil=${durUntil} stack=${ev.layer ?? ev.stack ?? 1} op=${ev.opType}`,
             );
 
             if (!entityUid) return;
@@ -265,11 +302,16 @@ class BuffMonitor {
 
             const stack = ev.layer ?? ev.stack ?? 1;
 
+            const existingSlot = slots.get(ev.slot);
+            if (existingSlot && existingSlot.durUntil > 0 && durUntil > existingSlot.durUntil) {
+                this.logger.debug(`[BUFF] Duration extended for ${idStr}: ${existingSlot.durUntil} -> ${durUntil}`);
+            }
+
             slots.set(ev.slot, {
                 durUntil,
                 cdUntil: 0,
                 stack,
-                durationMs,
+                durationMs: finalDurationMs,
                 startTime,
             });
 
@@ -277,7 +319,7 @@ class BuffMonitor {
                 durUntil,
                 cdUntil: 0,
                 stack,
-                durationMs,
+                durationMs: finalDurationMs,
                 startTime,
             });
             this.overlayDirty = true;
@@ -305,6 +347,10 @@ class BuffMonitor {
         const now = Date.now();
 
         for (const [entityUid, entityBuffs] of this.activeBuffsByEntity.entries()) {
+            if (this.monsterEntities.has(entityUid)) {
+                continue;
+            }
+
             if (filterEntityUid !== null && entityUid !== filterEntityUid) {
                 continue;
             }
@@ -314,31 +360,39 @@ class BuffMonitor {
 
             for (const [buffId, slots] of entityBuffs.entries()) {
                 const aggData = this.aggSlots(slots);
-                const name = this.buffMap[buffId] ?? '(未映射)';
+                const name = this.getBuffName(buffId);
+                const isDebuff = this.getBuffDebuff(buffId);
 
                 if (!this.isBuffEnabled(buffId, name)) {
                     continue;
                 }
 
-                const remainingMs = Math.max(0, aggData.durUntil - now);
+                const key = `${entityUid}:${buffId}`;
+                const globalState = global.__BUFF_STATE_MAP__?.get(key);
 
-                // 如果buff已过期，标记删除
+                if (globalState !== undefined && globalState.layer === 0) {
+                    buffsToDelete.push(buffId);
+                    this.logger.debug(`[BUFF] Buff ${buffId} consumed (layer=0), marking for removal`);
+                    continue;
+                }
+
+                let totalDurationMs = aggData.durationMs || 0;
+                let durUntil = aggData.durUntil;
+
+                const remainingMs = Math.max(0, durUntil - now);
+
                 if (remainingMs <= 0) {
                     buffsToDelete.push(buffId);
                     continue;
                 }
 
-                // 从全局状态获取最新的层数
-                const key = `${entityUid}:${buffId}`;
-                const globalState = global.__BUFF_STATE_MAP__?.get(key);
                 const currentStack = globalState?.layer ?? aggData.stack;
-
-                const totalDurationMs = aggData.durationMs || 0;
                 const progress = totalDurationMs > 0 ? remainingMs / totalDurationMs : 0;
 
                 entityResult[buffId] = {
                     name,
-                    durUntil: aggData.durUntil,
+                    isDebuff,
+                    durUntil,
                     stack: currentStack,
                     count: slots.size,
                     remainingSec: (remainingMs / 1000).toFixed(1),
@@ -347,13 +401,11 @@ class BuffMonitor {
                 };
             }
 
-            // 删除已过期的buff
             for (const buffId of buffsToDelete) {
                 entityBuffs.delete(buffId);
                 this.logger.debug(`[BUFF] Auto removed expired buff ${buffId} for entity ${entityUid}`);
             }
 
-            // 如果该角色没有buff了，删除整个角色
             if (entityBuffs.size === 0) {
                 this.activeBuffsByEntity.delete(entityUid);
             } else if (Object.keys(entityResult).length > 0) {
